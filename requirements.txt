@@ -1,0 +1,9 @@
+# Core dependencies
+torch
+numpy
+
+# Optional: for benchmarks (install with pip install -r requirements.txt or pip install -e .[benchmarks])
+# torchvision
+# matplotlib
+# transformers
+# datasets

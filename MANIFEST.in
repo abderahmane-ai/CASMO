@@ -1,0 +1,14 @@
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+recursive-include benchmarks *.py *.md
+recursive-exclude benchmarks *.pyc
+recursive-exclude benchmarks __pycache__
+recursive-exclude data *
+recursive-exclude tests *.pyc
+recursive-exclude tests __pycache__
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude *.so
+global-exclude *.dylib
