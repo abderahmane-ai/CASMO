@@ -30,7 +30,8 @@ for epoch in range(num_epochs):
 | Benchmark | Metric | CASMO | AdamW | Improvement |
 |-----------|--------|-------|-------|-------------|
 | **Noisy Grokking** (30% label noise) | Val Accuracy | **90.3%** | 24.0% | **+66.3%** |
-| **Long-tail CIFAR-100** | Few-shot Accuracy | **32.1%** | 28.3% | **+3.8%** |
+| **Long-tail CIFAR-100** (100:1) | Val Accuracy | **28.9%** | 23.9% | **+5.0%** |
+| **Long-tail CIFAR-100** | Few-shot Acc | **5.9%** | 4.1% | **+44% (rel)** |
 | **Performance** | Overhead vs AdamW | **-2%** | baseline | Faster! |
 
 > [!NOTE]
