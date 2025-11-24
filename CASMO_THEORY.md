@@ -65,7 +65,21 @@ Where $\sigma(z) = \frac{1}{1 + e^{-z}}$ is the sigmoid function.
 *   **High AGAR ($z > 0$)**: $C_t \to 1.0$ (Full learning rate).
 *   **Low AGAR ($z < 0$)**: $C_t \to c_{\min}$ (Suppressed learning rate).
 
-### 2.5 Parameter Update Rule
+### 2.5 DDEA: Drift-Detecting EMA Adapter
+While the initial calibration sets a baseline, training dynamics change over time. A fixed threshold might become stale. However, simply using an Exponential Moving Average (EMA) to track AGAR is dangerous: it can be dragged by **memorization** (overfitting to specific samples, causing high AGAR) or **noise spikes**.
+
+CASMO employs a **Drift-Detecting EMA Adapter (DDEA)** to robustly adapt the $\tau$ threshold (used as the center of the sigmoid mapping).
+
+#### Mechanisms:
+1.  **Variance Tracking**: DDEA tracks the variance of the AGAR signal itself.
+    *   High Variance $\to$ Unstable dynamics $\to$ Increase adaptation rate (Fast reaction).
+    *   Low Variance $\to$ Stable dynamics $\to$ Decrease adaptation rate (Stability).
+2.  **Dead Zone**: Small deviations in AGAR are ignored (treated as noise). The threshold only updates if the drift exceeds a percentage (e.g., 20%) of the current value. This prevents "chasing the noise."
+3.  **Memorization Guard**: If AGAR rises suspiciously high (e.g., > 1.2x calibrated baseline), DDEA freezes adaptation. This prevents the optimizer from validating overfitting as "high confidence signal."
+
+This ensures CASMO remains responsive to genuine distributional shifts (like curriculum learning changes) while resisting the instability of non-stationary noise.
+
+### 2.6 Parameter Update Rule
 The final update rule combines the AdamW update direction with the CASMO confidence scalar:
 
 $$ \theta_{t+1} = \theta_t - \eta \cdot \underbrace{C_t}_{\text{Confidence}} \cdot \underbrace{\frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}}_{\text{Adam Direction}} - \eta \lambda \theta_t $$
