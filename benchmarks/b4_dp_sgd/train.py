@@ -190,7 +190,7 @@ def main():
     parser.add_argument('--noise', type=float, default=1.0, help='DP Noise Multiplier (sigma)')
     parser.add_argument('--clip', type=float, default=1.0, help='Gradient Clipping Norm')
     parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--batch_size', type=int, default=32) # Reduced for Opacus memory overhead
+    parser.add_argument('--batch_size', type=int, default=16) # Reduced to 16 for Opacus GPU memory
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -22,8 +22,8 @@ class TestGradientEdgeCases:
         param = torch.nn.Parameter(torch.randn(5, 5))
         optimizer = CASMO([param], lr=1e-3)
         
-        # Set gradient to NaN
-        param.grad = torch.tensor([[float('nan')]])
+        # Set gradient to NaN with correct size
+        param.grad = torch.full((5, 5), float('nan'))
         
         with pytest.raises(RuntimeError, match="NaN gradient detected"):
             optimizer.step()
@@ -33,8 +33,8 @@ class TestGradientEdgeCases:
         param = torch.nn.Parameter(torch.randn(5, 5))
         optimizer = CASMO([param], lr=1e-3)
         
-        # Set gradient to Inf
-        param.grad = torch.tensor([[float('inf')]])
+        # Set gradient to Inf with correct size
+        param.grad = torch.full((5, 5), float('inf'))
         
         with pytest.raises(RuntimeError, match="Inf gradient detected"):
             optimizer.step()
@@ -111,11 +111,10 @@ class TestParameterEdgeCases:
     """Test edge cases related to parameters."""
     
     def test_empty_parameter_list(self):
-        """Test optimizer with empty parameter list."""
-        optimizer = CASMO([], lr=1e-3)
-        
-        # Step should not crash
-        optimizer.step()
+        """Test that empty parameter list raises ValueError (PyTorch behavior)."""
+        # PyTorch's base optimizer raises ValueError for empty params
+        with pytest.raises(ValueError, match="empty parameter list"):
+            optimizer = CASMO([], lr=1e-3)
     
     def test_single_parameter(self):
         """Test optimizer with single parameter."""

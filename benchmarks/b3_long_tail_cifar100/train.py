@@ -1,16 +1,18 @@
 """
 Long-Tailed Recognition Benchmark: CIFAR-100 with Class Imbalance
+Benchmark ID: B3
 
 Tests CASMO's ability to handle imbalanced datasets where standard optimizers
 overfit to majority classes and ignore minority (tail) classes.
 
 Task:
     Dataset: CIFAR-100 with exponential long-tail distribution
+    Model: ResNet-32
     Imbalance Ratio: 100:1 (most frequent class has 100x samples of rarest)
     
     Hypothesis:
-    - AdamW will overfit to majority classes (high head accuracy, low tail accuracy).
-    - CASMO will balance learning across all classes (better tail accuracy).
+    - AdamW will overfit to majority classes (high head accuracy, low tail accuracy)
+    - CASMO will balance learning across all classes (better tail accuracy)
     
     Reasoning:
     - Majority class gradients: Consistent (high AGAR) → normal learning rate

@@ -1,3 +1,20 @@
+"""
+Noisy Instruction Tuning Benchmark: LLM Fine-tuning with Corrupted Responses
+Benchmark ID: B6
+
+Tests CASMO's ability to fine-tune large language models on instruction datasets
+with corrupted responses, a critical challenge for real-world LLM deployment.
+
+Task:
+    Base Model: Gemma-2-2B (4-bit quantized)
+    Method: LoRA fine-tuning
+    Dataset: Instruction-response pairs with 30% corruption
+    
+    Hypothesis:
+    - AdamW will attempt to fit both clean and noisy responses, learning inconsistent behaviors
+    - CASMO will detect low-quality gradients from corrupted pairs and focus on clean data
+"""
+
 import sys
 import os
 import argparse

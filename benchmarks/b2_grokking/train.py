@@ -1,17 +1,18 @@
 """
-Noisy Grokking Benchmark: Modular Arithmetic (a + b) mod 97 with Label Noise
+Grokking Benchmark: Modular Arithmetic with Label Noise
+Benchmark ID: B2
 
 Tests CASMO's ability to "grok" (generalize) faster than AdamW on a task 
 known for delayed generalization, specifically in the presence of label noise.
 
 Task:
-    Input: Two integers (a, b) where 0 <= a, b < 97
-    Output: (a + b) % 97
-    Noise: 30% of training labels are corrupted to random values.
+    Dataset: Modular arithmetic (a + b) mod 97
+    Model: 1-layer Transformer
+    Noise: 30% of training labels are corrupted to random values
     
     Hypothesis:
-    - AdamW will memorize the noise (High Train Acc, Low Val Acc).
-    - CASMO will ignore the noise (Lower Train Acc, High Val Acc).
+    - AdamW will memorize the noise (High Train Acc, Low Val Acc)
+    - CASMO will ignore the noise (Lower Train Acc, High Val Acc)
 """
 
 import sys
