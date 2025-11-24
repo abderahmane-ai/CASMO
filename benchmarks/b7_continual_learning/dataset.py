@@ -111,7 +111,7 @@ class ContinualLearningDataset(Dataset):
     def _load_code(self, max_samples, split):
         """Load MBPP code generation tasks."""
         try:
-            # Load MBPP dataset
+            # Load MBPP dataset - specify 'sanitized' to avoid cache ambiguity
             dataset = load_dataset("mbpp", "sanitized", split="train")
             
             if split == 'train':
@@ -127,8 +127,8 @@ class ContinualLearningDataset(Dataset):
                 data.append({'instruction': instruction, 'response': response})
             
             return data
-        except:
-            print("Warning: Could not load MBPP, using synthetic code data")
+        except Exception as e:
+            print(f"Warning: Could not load MBPP ({str(e)}), using synthetic code data")
             return self._create_synthetic_code(max_samples if split == 'train' else 100)
     
     def _create_synthetic_code(self, count):
@@ -192,9 +192,10 @@ class ContinualLearningDataset(Dataset):
         return data
     
     def _load_writing(self, max_samples, split):
-        """Load ROCStories for creative writing."""
+        """Load WritingPrompts for creative writing."""
         try:
-            dataset = load_dataset("roostories", split="train")
+            # Load WritingPrompts dataset (Reddit writing prompts and stories)
+            dataset = load_dataset("euclaise/writingprompts", split="train")
             
             if split == 'train':
                 samples = dataset.select(range(min(max_samples, len(dataset))))
@@ -204,15 +205,25 @@ class ContinualLearningDataset(Dataset):
             
             data = []
             for item in samples:
-                # Use first sentence as prompt, rest as completion
-                sentences = item['storytitle']
-                instruction = f"Continue this story:\n{sentences}"
-                response = " ".join([item[f'sentence{i}'] for i in range(1, 6)])
-                data.append({'instruction': instruction, 'response': response})
+                # Use prompt as instruction, story as response
+                # WritingPrompts has 'prompt' and 'story' fields
+                prompt_text = item.get('prompt', '')
+                story_text = item.get('story', '')
+                
+                if prompt_text and story_text:
+                    instruction = f"Write a creative story based on this prompt:\n{prompt_text}"
+                    response = story_text
+                    data.append({'instruction': instruction, 'response': response})
             
-            return data
-        except:
-            print("Warning: Could not load ROCStories, using synthetic creative writing data")
+            # If we didn't get enough data, pad with synthetic
+            if len(data) < (max_samples if split == 'train' else 100):
+                print(f"Warning: Only got {len(data)} writing samples, padding with synthetic data")
+                needed = (max_samples if split == 'train' else 100) - len(data)
+                data.extend(self._create_synthetic_writing(needed))
+            
+            return data[:max_samples if split == 'train' else 100]
+        except Exception as e:
+            print(f"Warning: Could not load WritingPrompts ({str(e)}), using synthetic creative writing data")
             return self._create_synthetic_writing(max_samples if split == 'train' else 100)
     
     def _create_synthetic_writing(self, count):

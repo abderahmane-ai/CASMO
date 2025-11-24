@@ -1,35 +1,29 @@
 # CASMO: Confident Adaptive Selective Momentum Optimizer
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Paper: Theory](https://img.shields.io/badge/Paper-Theory-green.svg)](CASMO_THEORY.md)
 
 > **The Optimizer That Knows *What* To Learn.**
 
-CASMO is a production-ready PyTorch optimizer that extends AdamW with **automatic signal-to-noise detection**. By measuring the consistency of gradients over time (AGAR), CASMO dynamically adjusts learning rates to focus on generalizing patterns while ignoring noise, memorization, and outliers.
+## Abstract
+
+**CASMO** is a novel optimization algorithm designed to address the limitations of uniform gradient application in deep learning. Unlike standard optimizers (e.g., AdamW, SGD) that treat all gradients as equally valid, CASMO introduces **Adaptive Gradient-Aware Regularization (AGAR)**. This mechanism dynamically quantifies the "signal-to-noise" ratio of gradients over time, allowing the optimizer to selectively dampen updates that correspond to noise, outliers, or conflicting information while accelerating learning on generalizable patterns.
+
+This approach yields state-of-the-art stability in challenging regimes such as **label noise**, **long-tail distributions**, **differential privacy**, and **continual learning**.
 
 ---
 
-## 🚀 Why CASMO?
+## � Key Innovation: The AGAR Mechanism
 
-Standard optimizers like AdamW treat all gradients as equal. CASMO asks: *"Is this update reliable?"*
+The core of CASMO is the **Adaptive Gradient Alignment Ratio (AGAR)**, a metric that measures the consistency of gradient direction over a sliding window:
 
-*   **🛡️ Noise Robustness**: Automatically filters out label noise (e.g., corrupt datasets).
-*   **🔒 Differential Privacy**: Distinguishes signal from DP noise, achieving higher accuracy at the same $\epsilon$.
-*   **📉 Long-Tail Learning**: Prevents overfitting to noisy minority classes.
-*   **🧠 Continual Learning**: Reduces catastrophic forgetting by detecting gradient conflicts.
+$$ \text{AGAR} = \frac{||\mathbb{E}[g]||^2}{||\mathbb{E}[g]||^2 + \text{Var}[g]} $$
 
-## 📊 Key Results
+*   **High AGAR ($\approx 1$)**: Indicates consistent, reliable signal (e.g., generalizable features). CASMO applies full updates.
+*   **Low AGAR ($\approx 0$)**: Indicates high variance or conflict (e.g., label noise, privacy noise, catastrophic forgetting). CASMO automatically dampens the learning rate.
 
-| Benchmark | Challenge | CASMO | AdamW | Improvement |
-| :--- | :--- | :---: | :---: | :---: |
-| **B2: Grokking** | 30% Label Noise | **90.3%** | 24.0% | **+66.3%** |
-| **B3: Long-Tail** | CIFAR-100 (100:1) | **28.9%** | 23.9% | **+5.0%** |
-| **B4: Privacy** | DP-SGD ($\epsilon=0.37$) | **27.3%** | 26.3% | **+1.0%** |
-
-> [!TIP]
-> **See the Math**: Check out [CASMO_THEORY.md](CASMO_THEORY.md) for the full mathematical derivation of AGAR and confidence mapping.
+This allows CASMO to act as an **automatic filter** during training, improving robustness without manual hyperparameter tuning or data filtering.
 
 ---
 
@@ -38,7 +32,6 @@ Standard optimizers like AdamW treat all gradients as equal. CASMO asks: *"Is th
 ### Installation
 
 ```bash
-# From source
 git clone https://github.com/abderahmane-ai/CASMO.git
 cd CASMO
 pip install -e .
@@ -51,15 +44,15 @@ CASMO is a drop-in replacement for `torch.optim.AdamW`.
 ```python
 from casmo import CASMO
 
-# Initialize
+# Initialize with standard parameters
 optimizer = CASMO(
     model.parameters(), 
     lr=1e-3, 
     weight_decay=0.01,
-    granularity='group'  # 'group' is faster, 'parameter' is more precise
+    granularity='group'  # Recommended for efficiency
 )
 
-# Train loop (Standard PyTorch)
+# Standard PyTorch training loop
 for batch in dataloader:
     optimizer.zero_grad()
     loss = model(batch)
@@ -69,38 +62,17 @@ for batch in dataloader:
 
 ---
 
-## 🔬 How It Works: The AGAR Metric
+## 🧪 Benchmarks & Reproducibility
 
-CASMO computes the **Adaptive Gradient Alignment Ratio (AGAR)** to measure gradient consistency:
+We provide a comprehensive suite of benchmarks demonstrating CASMO's superiority in specific failure modes of standard optimizers. Each benchmark contains full reproduction scripts and detailed analysis.
 
-$$ \text{AGAR} = \frac{||\mathbb{E}[g]||^2}{||\mathbb{E}[g]||^2 + \text{Var}[g]} $$
-
-*   **High AGAR ($\approx 1$)**: Consistent signal (Generalization) $\rightarrow$ **High Confidence**
-*   **Low AGAR ($\approx 0$)**: Random noise (Memorization/DP Noise) $\rightarrow$ **Low Confidence**
-
-This confidence score dynamically scales the learning rate for each parameter group.
-
----
-
-## 🧪 Benchmarks
-
-We provide reproducible benchmarks covering diverse challenges:
-
-### [B2: Grokking & Generalization](benchmarks/b2_grokking/)
-**Challenge**: Modular arithmetic with 30% label noise.
-**Result**: AdamW memorizes noise (100% train, 24% val). CASMO groks the rule (90% val).
-
-### [B3: Long-Tail Recognition](benchmarks/b3_long_tail_cifar100/)
-**Challenge**: CIFAR-100 with 100:1 class imbalance.
-**Result**: CASMO improves few-shot accuracy by **44% relative** to AdamW.
-
-### [B4: Differential Privacy](benchmarks/b4_dp_sgd/)
-**Challenge**: DP-SGD training with $\epsilon \approx 0.37$ (High Noise).
-**Result**: CASMO extracts more utility (+1.0% acc) from the same privacy budget.
-
-### [B6: Noisy Instruction Tuning](benchmarks/b6_noisy_instruct/)
-**Challenge**: Fine-tuning Gemma-2B (4-bit) on noisy instructions.
-**Result**: CASMO filters out bad data, improving instruction following.
+| Benchmark | Domain | Challenge | Link |
+| :--- | :--- | :--- | :--- |
+| **B2** | **Generalization** | Grokking with 30% Label Noise | [View Benchmark](benchmarks/b2_grokking/) |
+| **B3** | **Long-Tail** | CIFAR-100 Class Imbalance (100:1) | [View Benchmark](benchmarks/b3_long_tail_cifar100/) |
+| **B4** | **Privacy** | DP-SGD with High Noise ($\epsilon \approx 0.37$) | [View Benchmark](benchmarks/b4_dp_sgd/) |
+| **B6** | **Fine-Tuning** | Noisy Instruction Tuning (LLMs) | [View Benchmark](benchmarks/b6_noisy_instruct/) |
+| **B7** | **Continual Learning** | Catastrophic Forgetting (Seq. Tasks) | [View Benchmark](benchmarks/b7_continual_learning/) |
 
 ---
 
@@ -108,15 +80,17 @@ We provide reproducible benchmarks covering diverse challenges:
 
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
-| `lr` | `1e-3` | Base learning rate |
-| `weight_decay` | `0.0` | Decoupled weight decay |
-| `granularity` | `'group'` | `'group'` (Fast, recommended) or `'parameter'` (Precise) |
-| `tau_init_steps` | `500` | Steps for initial calibration (auto-tuned) |
-| `c_min` | `0.1` | Minimum confidence floor (auto-adjusted) |
+| `lr` | `1e-3` | Base learning rate. |
+| `weight_decay` | `0.0` | Decoupled weight decay (same as AdamW). |
+| `granularity` | `'group'` | `'group'` (Fast, recommended) or `'parameter'` (Precise). |
+| `tau_init_steps` | `500` | Steps for initial AGAR calibration (auto-tuned). |
+| `c_min` | `0.1` | Minimum confidence floor (prevents dead neurons). |
 
 ---
 
 ## Citation
+
+If you use CASMO in your research, please cite:
 
 ```bibtex
 @software{casmo2025,

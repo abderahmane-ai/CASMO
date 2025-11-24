@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
+import warnings
 
 # Add parent directory to path to import casmo
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -56,24 +57,25 @@ def get_model_and_tokenizer(model_name="unsloth/gemma-2-2b-bnb-4bit"):
     """Load Gemma-2-2B with 4-bit quantization and LoRA."""
     print(f"Loading {model_name} with 4-bit quantization...")
     
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-    )
-
+    # Suppress the quantization config warning since unsloth models are pre-quantized
+    warnings.filterwarnings('ignore', message='.*quantization_config.*')
+    
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
 
+    # Load pre-quantized model (no need to pass quantization_config)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True
     )
     
+    # Suppress gradient checkpointing warning
+    warnings.filterwarnings('ignore', message='.*use_reentrant.*')
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    
+    # Disable cache when using gradient checkpointing to avoid warning
+    model.config.use_cache = False
     
     # LoRA Config
     peft_config = LoraConfig(
@@ -95,7 +97,7 @@ def get_model_and_tokenizer(model_name="unsloth/gemma-2-2b-bnb-4bit"):
 # Training and Evaluation
 # -----------------------------------------------------------------------------
 
-def train_on_task(model, optimizer, train_loader, task_id, epochs=3, grad_accum_steps=32):
+def train_on_task(model, optimizer, train_loader, task_id, epochs=3, grad_accum_steps=32, results_dict=None):
     """Train on a single task."""
     model.train()
     task_names = ["Math", "Code", "QA", "Writing"]
@@ -133,12 +135,24 @@ def train_on_task(model, optimizer, train_loader, task_id, epochs=3, grad_accum_
                 epoch_loss += current_loss
                 
                 progress_bar.set_postfix({'loss': f"{current_loss:.4f}"})
+                
+                # Track AGAR/Confidence for CASMO (Plot 3)
+                if results_dict is not None and hasattr(optimizer, '_group_states'):
+                    group_state = optimizer._group_states.get(0, {})
+                    agar = group_state.get('current_agar')
+                    conf = group_state.get('current_confidence')
+                    
+                    if agar is not None:
+                        results_dict['agar_history'].append(agar)
+                        results_dict['confidence_history'].append(conf)
+                        results_dict['steps'].append(global_step + (task_id * len(train_loader) // grad_accum_steps * epochs))
+                
                 global_step += 1
         
         avg_loss = epoch_loss / (len(train_loader) // grad_accum_steps)
         print(f"  Average Loss: {avg_loss:.4f}")
     
-    return losses
+    return losses, global_step
 
 
 def evaluate_on_task(model, test_loader, task_id):
@@ -214,24 +228,28 @@ def run_continual_learning(optimizer_name, tokenizer, epochs_per_task=3,
         'task_perplexity': {i: [] for i in range(4)},  # Perplexity for each task
         'training_losses': [],
         'evaluation_points': [],  # Which tasks were trained so far at each eval point
+        'agar_history': [],      # For Plot 3
+        'confidence_history': [], # For Plot 3
+        'steps': []              # For Plot 3
     }
     
     # Create test loaders for all tasks (used throughout)
     test_loaders = []
     for task_id in range(4):
-        test_dataset = ContinualLearningDataset(tokenizer, task_id, split='test', max_samples=100)
+        test_dataset = ContinualLearningDataset(tokenizer, task_id, split='test', max_samples=100, max_length=256)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
         test_loaders.append(test_loader)
     
     # Sequential training
     for task_id in range(4):
         # Create train loader for current task
-        train_dataset = ContinualLearningDataset(tokenizer, task_id, split='train', max_samples=500)
+        train_dataset = ContinualLearningDataset(tokenizer, task_id, split='train', max_samples=200, max_length=256)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         
         # Train on current task
         task_losses = train_on_task(model, optimizer, train_loader, task_id, 
-                                    epochs=epochs_per_task, grad_accum_steps=grad_accum_steps)
+                                    epochs=epochs_per_task, grad_accum_steps=grad_accum_steps,
+                                    results_dict=results if optimizer_name == 'casmo' else None)
         results['training_losses'].extend(task_losses)
         
         # Evaluate on all tasks learned so far
@@ -471,6 +489,155 @@ def plot_results(casmo_results, adamw_results, save_dir):
     print(f"\n✅ Comprehensive plots saved to {save_path}")
     plt.close()
 
+    # --- NEW PLOTS BASED ON ADVICE ---
+    
+    # Plot 1: The Forgetting Curve (The Hero Plot)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    def plot_forgetting_curve_single(results, name, ax):
+        tasks = range(4)
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'] # Standard matplotlib cycle
+        for task_id in tasks:
+            # Extract accuracy for this task at each evaluation point
+            # results['task_accuracy'][task_id] contains [acc_after_task0, acc_after_task1, ...]
+            accuracies = [a for a in results['task_accuracy'][task_id] if a is not None]
+            # X-axis points: The evaluation points where this task was measured
+            # e.g. Task 0 measured at 0, 1, 2, 3. Task 1 measured at 1, 2, 3.
+            x_points = range(task_id, 4) 
+            
+            if len(accuracies) > 0:
+                ax.plot(x_points, accuracies, 'o-', label=f'Task {task_id}: {task_names[task_id]}', 
+                        linewidth=2, color=colors[task_id])
+        
+        ax.set_xticks(tasks)
+        ax.set_xticklabels([f'After Task {i}' for i in tasks])
+        ax.set_ylabel('Accuracy (%)', fontsize=12)
+        ax.set_title(name, fontsize=14)
+        ax.set_ylim(0, 105)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plot_forgetting_curve_single(adamw_results, "AdamW (Catastrophic Forgetting)", ax1)
+    plot_forgetting_curve_single(casmo_results, "CASMO (Retained Knowledge)", ax2)
+    fig.suptitle('B7: Continual Learning - Sequential Task Performance', fontsize=16)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'plot1_forgetting_curves.png'), dpi=150, bbox_inches='tight')
+    print(f"✅ Plot 1 saved to plot1_forgetting_curves.png")
+    plt.close()
+
+    # Plot 2: Final Accuracy Bar Chart
+    fig, ax = plt.subplots(figsize=(10, 6))
+    tasks = range(4)
+    adamw_final = adamw_results['final_metrics']['final_accuracies']
+    casmo_final = casmo_results['final_metrics']['final_accuracies']
+    
+    x = np.arange(len(tasks))
+    width = 0.35
+    
+    bars1 = ax.bar(x - width/2, adamw_final, width, label='AdamW', color='tomato', alpha=0.8)
+    bars2 = ax.bar(x + width/2, casmo_final, width, label='CASMO', color='steelblue', alpha=0.8)
+    
+    ax.set_xlabel('Task', fontsize=12)
+    ax.set_ylabel('Final Accuracy (%)', fontsize=12)
+    ax.set_title('Final Performance After Sequential Training', fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'Task {i}: {task_names[i]}' for i in tasks])
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels
+    for bar in bars1 + bars2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
+                
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'plot2_final_performance.png'), dpi=150, bbox_inches='tight')
+    print(f"✅ Plot 2 saved to plot2_final_performance.png")
+    plt.close()
+
+    # Plot 3: AGAR/Confidence Over Time (Mechanism Proof)
+    if casmo_results.get('agar_history'):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+        
+        steps = casmo_results['steps']
+        agar = casmo_results['agar_history']
+        conf = casmo_results['confidence_history']
+        
+        # Plot AGAR
+        ax1.plot(steps, agar, color='green', alpha=0.7, linewidth=1)
+        ax1.set_ylabel('AGAR', fontsize=12)
+        ax1.set_title('CASMO Mechanism: AGAR Dynamics During Sequential Training', fontsize=14)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot Confidence
+        ax2.plot(steps, conf, color='blue', alpha=0.7, linewidth=1)
+        ax2.set_xlabel('Training Step', fontsize=12)
+        ax2.set_ylabel('Confidence', fontsize=12)
+        ax2.set_title('Confidence Scaling (Response to AGAR)', fontsize=14)
+        ax2.set_ylim(0, 1.1)
+        ax2.grid(True, alpha=0.3)
+        
+        # Add vertical lines for task boundaries (approximate)
+        total_steps = steps[-1] if steps else 0
+        if total_steps > 0:
+            steps_per_task = total_steps / 4
+            for i in range(1, 4):
+                boundary = i * steps_per_task
+                ax1.axvline(x=boundary, color='gray', linestyle='--', alpha=0.5)
+                ax2.axvline(x=boundary, color='gray', linestyle='--', alpha=0.5)
+                # Add task labels
+                ax1.text(boundary - steps_per_task/2, max(agar)*0.9, f"Task {i-1}", ha='center', alpha=0.6)
+            ax1.text(total_steps - steps_per_task/2, max(agar)*0.9, f"Task 3", ha='center', alpha=0.6)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, 'plot3_mechanism.png'), dpi=150, bbox_inches='tight')
+        print(f"✅ Plot 3 saved to plot3_mechanism.png")
+        plt.close()
+
+    # Plot 4: Summary Metrics Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    metrics = ['Avg Accuracy', 'Backward Transfer', 'Forgetting']
+    # Note: Forgetting is usually positive (drop), so we plot it as is. 
+    # Lower is better for Forgetting. Higher is better for others.
+    
+    casmo_vals = [
+        casmo_results['final_metrics']['average_accuracy'],
+        casmo_results['final_metrics']['backward_transfer'],
+        casmo_results['final_metrics']['forgetting']
+    ]
+    adamw_vals = [
+        adamw_results['final_metrics']['average_accuracy'],
+        adamw_results['final_metrics']['backward_transfer'],
+        adamw_results['final_metrics']['forgetting']
+    ]
+    
+    x = np.arange(len(metrics))
+    width = 0.35
+    
+    bars1 = ax.bar(x - width/2, adamw_vals, width, label='AdamW', color='tomato', alpha=0.8)
+    bars2 = ax.bar(x + width/2, casmo_vals, width, label='CASMO', color='steelblue', alpha=0.8)
+    
+    ax.set_ylabel('Score', fontsize=12)
+    ax.set_title('Continual Learning Metrics Summary', fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(metrics)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+    
+    # Add value labels
+    for bar in bars1 + bars2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + (1 if height>=0 else -5),
+                f'{height:.1f}', ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'plot4_summary_metrics.png'), dpi=150, bbox_inches='tight')
+    print(f"✅ Plot 4 saved to plot4_summary_metrics.png")
+    plt.close()
+
 
 # -----------------------------------------------------------------------------
 # Main
@@ -478,7 +645,7 @@ def plot_results(casmo_results, adamw_results, save_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='B7: Continual Learning Benchmark')
-    parser.add_argument('--epochs_per_task', type=int, default=3, help='Epochs to train on each task')
+    parser.add_argument('--epochs_per_task', type=int, default=2, help='Epochs to train on each task')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
     parser.add_argument('--grad_accum_steps', type=int, default=32, help='Gradient accumulation steps')
     parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate')
@@ -518,6 +685,13 @@ def main():
         grad_accum_steps=args.grad_accum_steps,
         lr=args.lr
     )
+    
+    # Clear GPU memory before ADAMW run to prevent memory fragmentation slowdown
+    print("\nClearing GPU memory...")
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    print("GPU memory cleared.\n")
     
     print("\n" + "="*70)
     print("STARTING ADAMW RUN")

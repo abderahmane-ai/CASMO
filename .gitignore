@@ -131,9 +131,9 @@ Thumbs.db
 
 # Project-specific
 data/
-benchmarks/*/results/
+# benchmarks/*/results/
 benchmarks/*/data/
-*.png
+# *.png
 *.jpg
 *.jpeg
 
