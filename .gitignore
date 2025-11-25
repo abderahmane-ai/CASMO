@@ -146,8 +146,5 @@ GITHUB_SETUP.md
 *.ckpt
 *.tar.gz
 
-# Emails
+# Email data
 emails/
-emails/sent/
-emails/drafts/
-emails/attachments/
