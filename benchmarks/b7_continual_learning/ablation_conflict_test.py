@@ -1,15 +1,27 @@
 """
-B8: Task Conflict Ablation & Mechanism Proof
--------------------------------------------
-Tests CASMO vs AdamW on a high-conflict synthetic scenario to demonstrate:
-1. Stability: CASMO resists catastrophic forgetting when formats change.
-2. Mechanism: Confidence histogram showing CASMO's adaptive behavior.
+B7 Ablation Study: High Conflict Stress Test
+Benchmark ID: B7 (Conflict Ablation)
 
-Scenario:
-- Task A: Math problems with format "Question: 1+1=? Answer: 2"
-- Task B: SAME problems with format "Input: 1+1=? Output: The solution is 2"
+Tests CASMO's mechanism under extreme gradient conflict to validate that
+AGAR correctly detects and responds to task interference.
 
-This pure format conflict is the "worst case" for standard optimizers.
+Task:
+    Model: Gemma-2-2B (4-bit quantized) + LoRA
+    Scenario: Sequential training on contradictory formatting for same content
+    - Task A: Math problems in format "Question: X Answer: Y"
+    - Task B: SAME math problems in format "Input: X Output: The solution is Y"
+    
+    This creates pure gradient conflict (same semantic content, different tokens),
+    which is the worst-case scenario for standard optimizers.
+    
+    Hypothesis:
+    - AdamW will suffer catastrophic forgetting (50%+ perplexity increase)
+    - CASMO will maintain stability (~30% perplexity increase or less)
+    
+    Reasoning:
+    - Conflicting gradients → Low AGAR → CASMO reduces learning rate automatically
+    - Confidence histogram will show CASMO detecting conflict (values < 1.0)
+    - This validates AGAR as a conflict detector, not just a performance optimizer
 """
 
 import sys
@@ -193,7 +205,7 @@ def main():
     ds_b_train = ConflictingMathDataset(tokenizer, task_id=1, num_samples=200)
     dl_b_train = DataLoader(ds_b_train, batch_size=4, shuffle=True)
     
-    results_dir = os.path.join(os.path.dirname(__file__), 'results_ablation')
+    results_dir = os.path.join(os.path.dirname(__file__), 'ablation_results')
     os.makedirs(results_dir, exist_ok=True)
     
     # -------------------------------------------------------------------------

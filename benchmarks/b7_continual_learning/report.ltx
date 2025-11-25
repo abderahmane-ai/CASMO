@@ -21,7 +21,7 @@
 \maketitle
 
 \begin{abstract}
-\noindent We introduce \textbf{CASMO} (Confident Adaptive Selective Momentum Optimizer), a novel optimization algorithm designed to solve catastrophic forgetting in Large Language Models (LLMs). By dynamically modulating learning rates based on the \textit{Adaptive Gradient Alignment Ratio} (AGAR), CASMO automatically detects and protects established knowledge from conflicting updates. In a sequential multi-task benchmark (B7), CASMO reduces forgetting by \textbf{13\%} and improves backward transfer by \textbf{42\%} compared to AdamW. Furthermore, in a high-conflict ablation study (B8), CASMO demonstrates \textbf{1.7x greater stability}, proving its ability to robustly handle contradictory data streams without manual intervention.
+\noindent We introduce \textbf{CASMO} (Confident Adaptive Selective Momentum Optimizer), a novel optimization algorithm designed to solve catastrophic forgetting in Large Language Models (LLMs). By dynamically modulating learning rates based on the \textit{Adaptive Gradient Alignment Ratio} (AGAR), CASMO automatically detects and protects established knowledge from conflicting updates. In a sequential multi-task benchmark, CASMO reduces forgetting by \textbf{13\%} and improves backward transfer by \textbf{42\%} compared to AdamW. Furthermore, in a high-conflict ablation study, CASMO demonstrates \textbf{1.7x greater stability}, proving its ability to robustly handle contradictory data streams without manual intervention.
 \end{abstract}
 
 \section{Introduction}
@@ -51,7 +51,7 @@ At the core of CASMO is the \textbf{Adaptive Gradient Alignment Ratio (AGAR)}, c
     \item \textbf{Hardware}: NVIDIA RTX 4050 Laptop (6GB VRAM)
 \end{itemize}
 
-\section{Study 1: Sequential Multi-Task Learning (B7)}
+\section{Study 1: Sequential Multi-Task Learning}
 We trained the model sequentially on four diverse domains: \textbf{Math} $\rightarrow$ \textbf{Code} $\rightarrow$ \textbf{QA} $\rightarrow$ \textbf{Creative Writing}. This setup tests the model's ability to accumulate skills without forgetting previous ones.
 
 \subsection{Key Results}
@@ -78,8 +78,8 @@ CASMO significantly outperforms AdamW in stability metrics.
     \label{fig:forgetting}
 \end{figure}
 
-\section{Study 2: High-Conflict Ablation (B8)}
-To stress-test the mechanism, we forced the model to learn two \textit{contradictory} formats for the same math problems. This creates a direct gradient conflict.
+\section{Study 2: Ablation - High-Conflict Stress Test}
+To validate that AGAR correctly detects gradient conflicts, we forced the model to learn two \textit{contradictory} formats for the same math problems. This creates a direct, controlled gradient conflict.
 
 \subsection{Results}
 CASMO's conflict detection kicked in automatically.
@@ -99,7 +99,7 @@ CASMO's conflict detection kicked in automatically.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{results_ablation/mechanism_confidence_hist.png}
+    \includegraphics[width=0.8\textwidth]{ablation_results/mechanism_confidence_hist.png}
     \caption{\textbf{Mechanism in Action}. This histogram shows CASMO's confidence scores during the conflict. The shift to the left (scores $< 1.0$) proves that CASMO \textit{detected} the conflict and \textit{intervened} by reducing the learning rate, without any manual tuning.}
     \label{fig:confidence}
 \end{figure}
