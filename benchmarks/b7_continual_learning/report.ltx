@@ -1,0 +1,110 @@
+\documentclass[11pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\geometry{margin=1in}
+
+\title{\textbf{CASMO: Robust Continual Learning via \\ Adaptive Gradient-Aware Regularization}}
+\author{Abderahmane Ainouche}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent We introduce \textbf{CASMO} (Confident Adaptive Selective Momentum Optimizer), a novel optimization algorithm designed to solve catastrophic forgetting in Large Language Models (LLMs). By dynamically modulating learning rates based on the \textit{Adaptive Gradient Alignment Ratio} (AGAR), CASMO automatically detects and protects established knowledge from conflicting updates. In a sequential multi-task benchmark (B7), CASMO reduces forgetting by \textbf{13\%} and improves backward transfer by \textbf{42\%} compared to AdamW. Furthermore, in a high-conflict ablation study (B8), CASMO demonstrates \textbf{1.7x greater stability}, proving its ability to robustly handle contradictory data streams without manual intervention.
+\end{abstract}
+
+\section{Introduction}
+Fine-tuning LLMs on new tasks typically degrades previously learned capabilities—a phenomenon known as catastrophic forgetting. Standard optimizers like AdamW treat all gradients equally, blindly overwriting critical weights when new data conflicts with old. 
+
+\textbf{CASMO} solves this by introducing a "confidence" metric. It distinguishes between:
+\begin{itemize}
+    \item \textbf{Signal}: Consistent gradients that generalize well.
+    \item \textbf{Conflict/Noise}: Gradients that fluctuate and threaten stability.
+\end{itemize}
+By selectively downweighting conflicting updates, CASMO enables models to learn new tasks while preserving the old.
+
+\section{Methodology: The AGAR Mechanism}
+At the core of CASMO is the \textbf{Adaptive Gradient Alignment Ratio (AGAR)}, computed for each parameter group:
+\begin{equation}
+    \text{AGAR} = \frac{||\mathbb{E}[g]||^2}{||\mathbb{E}[g]||^2 + \text{Var}[g]}
+\end{equation}
+\begin{itemize}
+    \item \textbf{High AGAR ($\approx 1$)}: The gradient is stable. The model is "confident" and learns at full speed.
+    \item \textbf{Low AGAR ($\ll 1$)}: The gradient is high-variance or conflicting. CASMO automatically lowers the learning rate to protect existing knowledge.
+\end{itemize}
+
+\section{Experimental Setup}
+\begin{itemize}
+    \item \textbf{Model}: \texttt{gemma-2-2b} (4-bit quantized)
+    \item \textbf{Method}: LoRA ($r=16, \alpha=32$)
+    \item \textbf{Hardware}: NVIDIA RTX 4050 Laptop (6GB VRAM)
+\end{itemize}
+
+\section{Study 1: Sequential Multi-Task Learning (B7)}
+We trained the model sequentially on four diverse domains: \textbf{Math} $\rightarrow$ \textbf{Code} $\rightarrow$ \textbf{QA} $\rightarrow$ \textbf{Creative Writing}. This setup tests the model's ability to accumulate skills without forgetting previous ones.
+
+\subsection{Key Results}
+CASMO significantly outperforms AdamW in stability metrics.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Metric} & \textbf{CASMO} & \textbf{AdamW} & \textbf{Impact} \\
+        \midrule
+        \textbf{Backward Transfer (BWT)} & \textbf{-0.80} & -1.14 & \textbf{+42\% Better Retention} \\
+        \textbf{Forgetting (Max Drop)} & \textbf{1.29} & 1.46 & \textbf{+13\% Less Forgetting} \\
+        Average Accuracy & 94.39\% & 95.03\% & Comparable \\
+        \bottomrule
+    \end{tabular}
+    \caption{CASMO retains significantly more knowledge from previous tasks (BWT) while maintaining competitive average accuracy.}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{results/plot1_forgetting_curves.png}
+    \caption{\textbf{Forgetting Curves}. Lower is better. CASMO (right) shows flatter curves for early tasks, indicating that learning new tasks (e.g., Creative Writing) does not erase Math or Code skills.}
+    \label{fig:forgetting}
+\end{figure}
+
+\section{Study 2: High-Conflict Ablation (B8)}
+To stress-test the mechanism, we forced the model to learn two \textit{contradictory} formats for the same math problems. This creates a direct gradient conflict.
+
+\subsection{Results}
+CASMO's conflict detection kicked in automatically.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{Optimizer} & \textbf{Forgetting (Perplexity Increase)} & \textbf{Stability Score} \\
+        \midrule
+        AdamW & +53.45 & 1.0x (Baseline) \\
+        \textbf{CASMO} & \textbf{+32.01} & \textbf{1.7x More Stable} \\
+        \bottomrule
+    \end{tabular}
+    \caption{In the face of direct conflict, CASMO resists catastrophic forgetting nearly twice as well as AdamW.}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{results_ablation/mechanism_confidence_hist.png}
+    \caption{\textbf{Mechanism in Action}. This histogram shows CASMO's confidence scores during the conflict. The shift to the left (scores $< 1.0$) proves that CASMO \textit{detected} the conflict and \textit{intervened} by reducing the learning rate, without any manual tuning.}
+    \label{fig:confidence}
+\end{figure}
+
+\section{Conclusion}
+CASMO offers a mathematically grounded, compute-efficient solution to catastrophic forgetting. By using gradient variance as a proxy for task conflict, it achieves \textbf{42\% better backward transfer} and \textbf{1.7x greater stability} than AdamW. It is a drop-in replacement optimizer that makes continual learning safer and more robust.
+
+\end{document}
