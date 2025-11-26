@@ -1,5 +1,7 @@
 # CASMO: Confident Adaptive Selective Momentum Optimizer
 
+[![PyPI version](https://badge.fury.io/py/casmo-optimizer.svg)](https://badge.fury.io/py/casmo-optimizer)
+[![Downloads](https://pepy.tech/badge/casmo-optimizer)](https://pepy.tech/project/casmo-optimizer)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Paper: Theory](https://img.shields.io/badge/Paper-Theory-green.svg)](CASMO_THEORY.md)
@@ -30,6 +32,14 @@ This allows CASMO to act as an **automatic filter** during training, improving r
 ## ⚡ Quick Start
 
 ### Installation
+
+**Via PyPI (Recommended):**
+
+```bash
+pip install casmo-optimizer
+```
+
+**From Source (For Development):**
 
 ```bash
 git clone https://github.com/abderahmane-ai/CASMO.git
