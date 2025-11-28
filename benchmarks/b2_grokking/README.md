@@ -63,10 +63,16 @@ CASMO should show:
 - Faster grokking transition
 - More stable AGAR values after calibration
 
-## Expected Outcome
+## Observed Results (Nov 2025)
 
-CASMO should demonstrate superior ability to:
-1. Ignore noisy training samples
-2. Extract the algorithmic structure
-3. Generalize to unseen data
-4. Achieve the "grokking" transition faster than AdamW
+The benchmark confirmed the hypothesis with striking clarity:
+
+| Metric | CASMO | AdamW |
+| :--- | :---: | :---: |
+| **Train Accuracy** | **~70.7%** | **100%** |
+| **Val Accuracy** | **~90.4%** | **24.0%** |
+
+- **AdamW** fell into the "memorization trap," learning the 30% noisy labels perfectly (100% train acc) but failing to learn the rule (24% val acc).
+- **CASMO** refused to memorize the noise (capping at ~70% train acc) and successfully "grokked" the rule (90% val acc).
+
+See [Full Report](reports/REPORT.md) for details.

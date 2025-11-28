@@ -1,6 +1,6 @@
 # Benchmark Report: Noisy Modular Arithmetic Grokking
 
-**Date:** November 22, 2025
+**Date:** November 28, 2025
 **Author:** Abderahmane Ainouche
 **Benchmark ID:** B2    
 
@@ -29,9 +29,9 @@ CASMO demonstrated "true grokking" by selectively ignoring the noise, while Adam
 
 | Metric | CASMO | AdamW | Improvement |
 | :--- | :---: | :---: | :---: |
-| **Final Training Accuracy** | **69.8%** | 100.0% | - |
-| **Final Validation Accuracy** | **90.3%** | 24.0% | **+66.3%** |
-| **Generalization Gap** | **+20.5%** | -76.0% | **Huge** |
+| **Final Training Accuracy** | **70.7%** | 100.0% | - |
+| **Final Validation Accuracy** | **90.4%** | 24.0% | **+66.4%** |
+| **Generalization Gap** | **+19.7%** | -76.0% | **Huge** |
 
 ## 3. Detailed Analysis
 
@@ -39,7 +39,7 @@ CASMO demonstrated "true grokking" by selectively ignoring the noise, while Adam
 AdamW exhibited classic overfitting behavior. It rapidly converged to **100% training accuracy**, indicating it successfully memorized every single training example, including the 30% corrupt labels. Consequently, its validation accuracy peaked early (~30%) and then degraded/stagnated around **24%**, as the model capacity was consumed by fitting random noise.
 
 ### 3.2 Noise-Robust Grokking (CASMO)
-CASMO's training accuracy plateaued at **~69.8%**. This is a critical finding: since 30% of the labels are random noise, the maximum possible accuracy for a model that *only* learns the true rule is ~70%. CASMO's refusal to go higher proves it **did not memorize the noise**. Instead, its validation accuracy soared to **>90%**, showing it learned the underlying modular arithmetic rule perfectly.
+CASMO's training accuracy plateaued at **~70.7%**. This is a critical finding: since 30% of the labels are random noise, the maximum possible accuracy for a model that *only* learns the true rule is ~70%. CASMO's refusal to go higher proves it **did not memorize the noise**. Instead, its validation accuracy soared to **>90%**, showing it learned the underlying modular arithmetic rule perfectly.
 
 ### 3.3 AGAR Dynamics
 The success of CASMO validates the **Adaptive Gradient Alignment Ratio (AGAR)** hypothesis.

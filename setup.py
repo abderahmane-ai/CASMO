@@ -29,7 +29,7 @@ else:
 
 setup(
     name="casmo-optimizer",
-    version="0.1.0",
+    version="0.2.0",
     author="Abderahmane Ainouche",
     author_email="abderahmane.ainouche.ai@gmail.com",
     description="Noise-robust PyTorch optimizer with automatic confidence-based learning rate adaptation",

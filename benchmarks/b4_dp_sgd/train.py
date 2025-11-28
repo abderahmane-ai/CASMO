@@ -227,7 +227,7 @@ def main():
                             max_grad_norm=args.clip, noise_multiplier=args.noise)
                             
     sgd_res = run_benchmark('sgd', device, trainloader, testloader, 
-                           num_epochs=args.epochs, lr=0.1, # SGD usually needs higher LR
+                           num_epochs=args.epochs, lr=args.lr, 
                            max_grad_norm=args.clip, noise_multiplier=args.noise)
     
     # Plot

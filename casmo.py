@@ -668,7 +668,7 @@ class CASMO(torch.optim.Optimizer):
                     
                     # Diagnostic logging
                     if group_state['tau_initialized'] and self._step_count % 100 == 0:
-                        mu = group_state.get('agar_mean', 0)
+                        mu = group_state['tau_adapter'].tau
                         sigma = group_state.get('agar_std', 0)
                         self._log(3, f"Step {self._step_count} - AGAR={agar_value:.4f}, μ={mu:.4f}, "
                                      f"σ={sigma:.4f}, Confidence={confidence_value:.4f}")
@@ -748,7 +748,7 @@ class CASMO(torch.optim.Optimizer):
                     
                     # Diagnostic logging
                     if group_state['tau_initialized'] and self._step_count % 100 == 0:
-                        mu = group_state.get('agar_mean', 0)
+                        mu = group_state['tau_adapter'].tau
                         sigma = group_state.get('agar_std', 0)
                         self._log(3, f"Step {self._step_count} - AGAR={agar_value:.4f}, μ={mu:.4f}, "
                                      f"σ={sigma:.4f}, Confidence={confidence_value:.4f}")
