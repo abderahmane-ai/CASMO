@@ -646,7 +646,7 @@ class CASMO(torch.optim.Optimizer):
                     
                     # Universal sigmoid-based confidence mapping
                     if group_state['tau_initialized']:
-                        mu = group_state.get('agar_mean', agar_value)
+                        mu = group_state['tau_adapter'].tau
                         sigma = group_state.get('agar_std', 0.1)
                         c_min_adaptive = group_state.get('c_min', c_min)
                         
@@ -726,7 +726,7 @@ class CASMO(torch.optim.Optimizer):
                     
                     # Universal sigmoid-based confidence mapping
                     if group_state['tau_initialized']:
-                        mu = group_state.get('agar_mean', agar_value)
+                        mu = group_state['tau_adapter'].tau
                         sigma = group_state.get('agar_std', 0.1)
                         c_min_adaptive = group_state.get('c_min', c_min)
                         
