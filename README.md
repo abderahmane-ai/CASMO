@@ -83,6 +83,7 @@ We provide a comprehensive suite of benchmarks demonstrating CASMO's superiority
 | **B4** | **Privacy** | DP-SGD with High Noise ($\epsilon \approx 0.37$) | [View Benchmark](benchmarks/b4_dp_sgd/) |
 | **B6** | **Fine-Tuning** | Noisy Instruction Tuning (LLMs) | [View Benchmark](benchmarks/b6_noisy_instruct/) |
 | **B7** | **Continual Learning** | Catastrophic Forgetting (Seq. Tasks) | [View Benchmark](benchmarks/b7_continual_learning/) |
+| **B8** | **Finance** | Portfolio Optimization (Crypto + Macro) | [View Benchmark](benchmarks/b8_noisy_timeseries/) |
 
 ---
 
