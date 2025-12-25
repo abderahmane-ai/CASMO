@@ -4,14 +4,14 @@
 **Domain:** Quantitative Finance (High Volatility, Non-Stationary)  
 **Status:** ✅ CASMO Superiority Verified
 
----\n
+---
 ## 1. Abstract
 
 This benchmark evaluates CASMO's ability to act as an autonomous "Portfolio Manager" in a highly stochastic environment. Unlike standard optimization tasks where lower loss is better, financial optimization requires balancing **Return**, **Risk**, and **Transaction Costs**.
 
 We introduce a "Stress Test" universe containing traditional assets (`Stocks`, `Bonds`, `Real Estate`, `Gold`) and a high-volatility chaos agent (`Bitcoin`). The hypothesis is that standard optimizers (AdamW) will overfit to the noise of the chaos agent, leading to high turnover and transaction costs, while CASMO's **AGAR** mechanism will filter the noise, leading to stable, conviction-based trading.
 
----\n
+---
 ## 2. Experimental Design
 
 ### 2.1 The Asset Universe
@@ -35,7 +35,7 @@ To prevent theoretical overfitting, we enforce strict real-world constraints:
 1.  **Walk-Forward Validation:** No shuffling. The model predicts the "future" sequentially (2020-2023).
 2.  **Transaction Costs:** **10 bps (0.10%)** penalty per turnover. This punishes "jittery" models.
 
----\n
+---
 ## 3. Results Analysis
 
 **Test Period:** Jan 2020 - Dec 2023 (The "Crisis Era")
@@ -58,7 +58,7 @@ Despite trading 5x less, CASMO achieved a higher **Sharpe Ratio (0.94)** and low
 *   It effectively avoided the "whipsaw" losses that AdamW suffered by chasing false breakouts in Bitcoin.
 *   It protected capital better than the diversified 1/N benchmark during the 2020 and 2022 crashes.
 
----\n
+---
 ## 4. Visual Analysis
 
 Refer to `results/portfolio_benchmark.png`:
@@ -70,7 +70,7 @@ Refer to `results/portfolio_benchmark.png`:
     *   CASMO's weight transitions are smooth and deliberate.
     *   AdamW's weights likely show rapid, erratic shifting between assets (noise chasing).
 
----\n
+---
 ## 5. Conclusion
 
 **CASMO is the superior optimizer for financial applications.**
