@@ -25,6 +25,7 @@ import argparse
 import logging
 import random
 import time
+import warnings
 
 # Add parent directory to path to import casmo
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -34,13 +35,20 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import matplotlib.pyplot as plt
+
+# Try importing yfinance, else set flag
+try:
+    import yfinance as yf
+    HAS_YFINANCE = True
+except ImportError:
+    HAS_YFINANCE = False
+    print("⚠️  yfinance not found. Using synthetic data.")
 
 from casmo import CASMO
 
 # -----------------------------------------------------------------------------
-# 1. Dataset: Multi-Asset Universe
+# 1. Dataset: Multi-Asset Universe (Real & Synthetic Fallback)
 # -----------------------------------------------------------------------------
 
 class FinancialPortfolioDataset(Dataset):
@@ -56,20 +64,41 @@ class FinancialPortfolioDataset(Dataset):
         self.seq_len = seq_len
         self.split = split
         
-        # 1. Download Data
-        print(f"[{split.upper()}] Loading data for: {', '.join(tickers)}")
-        # Download generous range
-        data = yf.download(tickers, start="2015-01-01", end="2024-01-01", progress=False)
-        
-        # Handle yfinance API structure
-        if 'Adj Close' in data.columns:
-            prices = data['Adj Close']
-        elif 'Close' in data.columns:
-            prices = data['Close']
+        # 1. Download or Generate Data
+        if HAS_YFINANCE:
+            try:
+                print(f"[{split.upper()}] Downloading data for: {', '.join(tickers)}")
+                # Download generous range
+                data = yf.download(tickers, start="2015-01-01", end="2024-01-01", progress=False)
+                
+                # Handle yfinance API structure
+                if 'Adj Close' in data.columns:
+                    prices = data['Adj Close']
+                elif 'Close' in data.columns:
+                    prices = data['Close']
+                else:
+                    prices = data
+                
+                # Check if we actually got data
+                if prices.empty:
+                    raise ValueError("Empty data returned from yfinance")
+                    
+                # Fix: Reorder columns to match 'tickers' list (yfinance sorts alphabetically)
+                # Verify all tickers are present before reindexing
+                available_tickers = [t for t in tickers if t in prices.columns]
+                if len(available_tickers) != len(tickers):
+                    print(f"⚠️  Warning: Missing tickers. Request: {tickers}, Found: {available_tickers}")
+                
+                prices = prices[available_tickers]
+                prices = prices.dropna()
+                
+            except Exception as e:
+                print(f"⚠️  yfinance failed ({e}). Switching to SYNTHETIC mode.")
+                prices = self._generate_synthetic_data(tickers)
         else:
-            prices = data
+            print(f"[{split.upper()}] Generating synthetic financial data...")
+            prices = self._generate_synthetic_data(tickers)
             
-        prices = prices.dropna()
         self.dates = prices.index
         
         # 2. Compute Log Returns
@@ -102,7 +131,42 @@ class FinancialPortfolioDataset(Dataset):
         self.X = torch.FloatTensor(np.array(self.X))
         self.y_next = torch.FloatTensor(np.array(self.y_next))
         
-        print(f"[{split.upper()}] Samples: {len(self.X)} | Risk Regime: {{'Crisis (2020-2023)' if split=='test' else 'Bull (2015-2019)'}}")
+        regime = 'Crisis/Bear (2020+)' if split=='test' else 'Bull/Mixed (2015-2019)'
+        print(f"[{split.upper()}] Samples: {len(self.X)} | Regime: {regime}")
+
+    def _generate_synthetic_data(self, tickers):
+        """Generates geometric brownian motion with regime shifts."""
+        np.random.seed(42)
+        dates = pd.date_range(start="2015-01-01", end="2024-01-01", freq='B')
+        n = len(dates)
+        prices = pd.DataFrame(index=dates, columns=tickers)
+        
+        for ticker in tickers:
+            # Base params
+            mu = 0.0003 # ~7% annual
+            sigma = 0.015 # ~23% annual vol
+            
+            # Specific traits
+            if 'BTC' in ticker:
+                sigma *= 3.0
+                mu *= 1.5
+            if 'TLT' in ticker:
+                sigma *= 0.5
+                mu *= 0.6
+                
+            # Regime 1: Bullish (First 60%)
+            r1 = np.random.normal(mu, sigma, int(n*0.6))
+            
+            # Regime 2: Crash/Volatile (Next 40%) - Lower return, higher vol
+            r2 = np.random.normal(mu - 0.0005, sigma * 2.0, n - int(n*0.6))
+            
+            returns = np.concatenate([r1, r2])
+            
+            # Construct price path
+            p = 100 * np.exp(np.cumsum(returns))
+            prices[ticker] = p
+            
+        return prices
 
     def __len__(self):
         return len(self.X)
@@ -289,7 +353,7 @@ def calculate_metrics(equity_curve, turnover_avg, name):
     # CAGR
     total_ret = equity_curve[-1] - 1
     years = len(equity_curve) / 252.0
-    cagr = (equity_curve[-1])**(1/years) - 1
+    cagr = (equity_curve[-1])**(1/max(years, 0.1)) - 1
     
     # Sharpe
     mean = np.mean(returns)
@@ -306,12 +370,17 @@ def calculate_metrics(equity_curve, turnover_avg, name):
     dd = (peak - equity_curve) / peak
     max_dd = np.max(dd)
     
+    # Calmar (CAGR / MaxDD)
+    calmar = cagr / (max_dd + 1e-9)
+    if max_dd == 0: calmar = 0.0
+
     return {
         'Name': name,
         'CAGR': cagr,
         'Sharpe': sharpe,
         'Sortino': sortino,
         'MaxDD': max_dd,
+        'Calmar': calmar,
         'Turnover': turnover_avg,
         'TotalRet': total_ret
     }
@@ -338,64 +407,83 @@ def main():
     res_casmo = run_benchmark("CASMO", device, train_loader, test_loader, num_assets, args.epochs)
     res_adam = run_benchmark("AdamW", device, train_loader, test_loader, num_assets, args.epochs)
     
-    # 3. Simulate 1/N Benchmark
+    # 3. Baseline 1: 1/N (Equal Weight)
     print("\nSimulating 1/N Benchmark...")
     eq_1n = [1.0]
     w_1n = np.ones(num_assets) / num_assets
     for _, y in test_loader:
         ret = np.sum(w_1n * y.numpy())
-        eq_1n.append(eq_1n[-1] * (1 + ret))
+        eq_1n.append(eq_1n[-1] * (1 + ret)) # 1/N usually assumes daily rebal or drift. Rebal here.
     res_1n = {'equity': np.array(eq_1n), 'turnover': 0.0}
+
+    # 4. Baseline 2: Buy & Hold SPY (First asset)
+    print("Simulating Buy & Hold (Asset 0: SPY)...")
+    eq_spy = [1.0]
+    w_spy = np.zeros(num_assets)
+    w_spy[0] = 1.0 # Assuming SPY is first
+    for _, y in test_loader:
+        ret = np.sum(w_spy * y.numpy())
+        eq_spy.append(eq_spy[-1] * (1 + ret))
+    res_spy = {'equity': np.array(eq_spy), 'turnover': 0.0}
     
-    # 4. Generate Report
+    # 5. Generate Report
     metrics = []
-    metrics.append(calculate_metrics(res_1n['equity'], 0.0, "1/N Bench"))
+    metrics.append(calculate_metrics(res_spy['equity'], 0.0, "Buy & Hold (SPY)"))
+    metrics.append(calculate_metrics(res_1n['equity'], 0.0, "1/N Equal Wgt"))
     metrics.append(calculate_metrics(res_adam['equity'], res_adam['turnover'], "AdamW"))
     metrics.append(calculate_metrics(res_casmo['equity'], res_casmo['turnover'], "CASMO"))
     
-    print("\n" + "="*95)
-    print(f"{ 'Strategy':<15} | {'CAGR':<8} | {'Sharpe':<6} | {'Sortino':<7} | {'MaxDD':<7} | {'Turnover':<8}")
-    print("-" * 95)
+    print("\n" + "="*115)
+    print(f"{'Strategy':<18} | {'CAGR':<8} | {'Sharpe':<6} | {'Sortino':<7} | {'MaxDD':<7} | {'Calmar':<7} | {'Turnover':<8}")
+    print("-" * 115)
     for m in metrics:
-        print(f"{m['Name']:<15} | {m['CAGR']*100:>7.1f}% | {m['Sharpe']:>6.2f} | {m['Sortino']:>7.2f} | {m['MaxDD']*100:>6.1f}% | {m['Turnover']*100:>7.2f}%")
-    print("="*95)
+        print(f"{m['Name']:<18} | {m['CAGR']*100:>7.1f}% | {m['Sharpe']:>6.2f} | {m['Sortino']:>7.2f} | {m['MaxDD']*100:>6.1f}% | {m['Calmar']:>7.2f} | {m['Turnover']*100:>7.2f}%")
+    print("="*115)
     
-    # 5. Plotting
+    # 6. Plotting
     print("\nPlotting results...")
     results_dir = os.path.join(os.path.dirname(__file__), 'results')
     os.makedirs(results_dir, exist_ok=True)
     
-    fig, axes = plt.subplots(3, 1, figsize=(12, 16))
+    # Use a style if available, otherwise default
+    try:
+        plt.style.use('seaborn-v0_8-darkgrid')
+    except:
+        plt.style.use('ggplot')
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 16), gridspec_kw={'height_ratios': [2, 1, 1]})
     dates = test_ds.sample_dates
     
     # Equity Curve
     ax1 = axes[0]
-    ax1.plot(dates, res_1n['equity'][1:], label='1/N (Equal Weight)', color='gray', linestyle=':')
-    ax1.plot(dates, res_adam['equity'][1:], label='AdamW', color='orange')
-    ax1.plot(dates, res_casmo['equity'][1:], label='CASMO', color='green', linewidth=2)
-    ax1.set_title(f"Cumulative Wealth (2020-2023) [Initial: $1.0]")
-    ax1.set_ylabel("Portfolio Value ($)")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    ax1.plot(dates, res_spy['equity'][1:], label='Buy & Hold (SPY)', color='gray', linestyle='--', alpha=0.6)
+    ax1.plot(dates, res_1n['equity'][1:], label='1/N (Equal Weight)', color='blue', linestyle=':', alpha=0.6)
+    ax1.plot(dates, res_adam['equity'][1:], label='AdamW (Standard)', color='#e74c3c', linewidth=1.5)
+    ax1.plot(dates, res_casmo['equity'][1:], label='CASMO (Proposed)', color='#2ecc71', linewidth=2.5)
+    
+    ax1.set_title(f"Cumulative Wealth (Test Phase: 2020-2023)", fontsize=14, fontweight='bold')
+    ax1.set_ylabel("Portfolio Value ($) [Initial: $1.0]", fontsize=12)
+    ax1.legend(loc='upper left', frameon=True, fancybox=True, framealpha=0.9)
+    ax1.margins(x=0)
     
     # Weights - CASMO
     ax2 = axes[1]
-    ax2.stackplot(dates, res_casmo['weights'].T, labels=train_ds.tickers, alpha=0.8)
-    ax2.set_title("CASMO: Asset Allocation")
-    ax2.set_ylabel("Weight %")
-    ax2.legend(loc='upper left')
-    ax2.margins(0, 0)
+    ax2.stackplot(dates, res_casmo['weights'].T, labels=train_ds.tickers, alpha=0.85, cmap='viridis')
+    ax2.set_title("CASMO: Adaptive Asset Allocation (Stable)", fontsize=12, fontweight='bold')
+    ax2.set_ylabel("Weight Allocation", fontsize=10)
+    ax2.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    ax2.margins(x=0, y=0)
     
     # Weights - AdamW
     ax3 = axes[2]
-    ax3.stackplot(dates, res_adam['weights'].T, labels=train_ds.tickers, alpha=0.8)
-    ax3.set_title("AdamW: Asset Allocation")
-    ax3.set_ylabel("Weight %")
-    ax3.margins(0, 0)
+    ax3.stackplot(dates, res_adam['weights'].T, labels=train_ds.tickers, alpha=0.85, cmap='viridis')
+    ax3.set_title("AdamW: Asset Allocation (High Turnover/Noise)", fontsize=12, fontweight='bold')
+    ax3.set_ylabel("Weight Allocation", fontsize=10)
+    ax3.margins(x=0, y=0)
     
     plt.tight_layout()
     save_path = os.path.join(results_dir, 'portfolio_benchmark.png')
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"✅ Results saved to {save_path}")
 
 if __name__ == "__main__":
