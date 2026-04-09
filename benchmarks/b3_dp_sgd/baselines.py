@@ -20,8 +20,7 @@ def get_optimizer(model, optimizer_name, lr):
             weight_decay=1e-4,
             granularity='group',
             tau_init_steps=100,
-            c_min=0.1,
-            log_level=0
+            c_min=0.1
         )
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")

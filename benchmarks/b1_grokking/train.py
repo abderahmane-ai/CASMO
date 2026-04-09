@@ -179,16 +179,13 @@ def run_benchmark(optimizer_name, device, train_loader, test_loader, num_epochs=
     
     if optimizer_name == 'casmo':
         total_steps = len(train_loader) * num_epochs
-        tau_init_steps = max(50, int(0.05 * total_steps))
         
         optimizer = CASMO(
             model.parameters(),
             lr=lr,
             weight_decay=weight_decay,
             granularity='group',
-            log_level=1,
-            tau_init_steps=tau_init_steps,
-            tau_dead_zone=0.2,
+            total_steps=total_steps,
             c_min=0.1
         )
     else:

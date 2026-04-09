@@ -254,19 +254,16 @@ def run_benchmark(optimizer_name, device, train_loader, test_loader, num_assets,
     
     # CASMO Configuration
     if optimizer_name == "CASMO":
-        # 5% of Total Steps for Calibration (User Request)
         total_steps = len(train_loader) * epochs
-        tau_init_steps = int(0.05 * total_steps)
-        tau_init_steps = max(50, tau_init_steps) # Safety floor
         
-        print(f"CASMO Configuration: Total Steps={total_steps}, Tau Init={tau_init_steps} (5%)")
+        print(f"CASMO Configuration: Total Steps={total_steps}")
         
         optimizer = CASMO(
             model.parameters(), 
             lr=1e-3, 
             weight_decay=0.0, # No L2, we want pure Sharpe optimization
             granularity='group',
-            tau_init_steps=tau_init_steps,
+            total_steps=total_steps,
             c_min=0.1
         )
     else:

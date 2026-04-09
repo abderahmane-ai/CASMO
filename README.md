@@ -76,14 +76,15 @@ for batch in dataloader:
 
 We provide a comprehensive suite of benchmarks demonstrating CASMO's superiority in specific failure modes of standard optimizers. Each benchmark contains full reproduction scripts and detailed analysis.
 
-| Benchmark | Domain | Challenge | Link |
-| :--- | :--- | :--- | :--- |
-| **B2** | **Generalization** | Grokking with 30% Label Noise | [View Benchmark](benchmarks/b2_grokking/) |
-| **B3** | **Long-Tail** | CIFAR-100 Class Imbalance (100:1) | [View Benchmark](benchmarks/b3_long_tail_cifar100/) |
-| **B4** | **Privacy** | DP-SGD with High Noise ($\epsilon \approx 0.37$) | [View Benchmark](benchmarks/b4_dp_sgd/) |
-| **B6** | **Fine-Tuning** | Noisy Instruction Tuning (LLMs) | [View Benchmark](benchmarks/b6_noisy_instruct/) |
-| **B7** | **Continual Learning** | Catastrophic Forgetting (Seq. Tasks) | [View Benchmark](benchmarks/b7_continual_learning/) |
-| **B8** | **Finance** | Portfolio Optimization (Crypto + Macro) | [View Benchmark](benchmarks/b8_noisy_timeseries/) |
+| Benchmark | Domain | Challenge | Key Result | Link |
+| :--- | :--- | :--- | :--- | :--- |
+| **B1** | **Generalization** | Grokking with 30% Label Noise | 90.4% vs 24.0% val acc | [View](benchmarks/b1_grokking/) |
+| **B2** | **Long-Tail** | CIFAR-100 Imbalance (100:1) | Better tail-class accuracy | [View](benchmarks/b2_long_tail_cifar100/) |
+| **B3** | **Privacy** | DP-SGD (ε ≈ 0.37) | Maintains accuracy under DP | [View](benchmarks/b3_dp_sgd/) |
+| **B4** | **Continual Learning** | Sequential LLM Fine-tuning | 13% less forgetting | [View](benchmarks/b4_continual_learning/) |
+| **B5** | **Finance** | Portfolio Optimization | Lower turnover, higher Sharpe | [View](benchmarks/b5_noisy_timeseries/) |
+
+See [benchmarks/README.md](benchmarks/README.md) for detailed results and reproduction instructions.
 
 ---
 

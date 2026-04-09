@@ -215,8 +215,7 @@ def run_continual_learning(optimizer_name, tokenizer, epochs_per_task=3,
             tau_init_steps=100,  # Fast calibration
             weight_decay=0.01,
             granularity='group',
-            betas=(0.9, 0.999),
-            log_level=1
+            betas=(0.9, 0.999)
         )
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
