@@ -5,6 +5,38 @@ All notable changes to CASMO will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-01-09
+
+### Added
+- **Documentation**: Comprehensive documentation suite in `docs/` directory
+  - Getting Started guide with installation and quick start
+  - Complete API Reference with all parameters documented
+  - FAQ with 30+ common questions and answers
+  - Migration Guide for moving from Adam/AdamW to CASMO
+- **Examples**: 5 working examples in `examples/` directory
+  - Basic usage example (minimal working code)
+  - Image classification with CIFAR-10 and ResNet
+  - LLM fine-tuning example with Transformers
+  - Optimizer comparison with visualization
+- **GitHub Infrastructure**: CI/CD and contribution templates
+  - Automated testing workflow (multi-OS, multi-Python)
+  - Code quality checks (Black, flake8, mypy)
+  - Automated PyPI publishing workflow
+  - Issue templates (bug report, feature request)
+  - Pull request template with checklist
+- **Contributing Guide**: Complete CONTRIBUTING.md with development guidelines
+- **Benchmark Overview**: Comprehensive benchmarks/README.md documenting all 5 benchmarks
+
+### Changed
+- **README**: Updated benchmark table to match actual benchmarks (b1-b5)
+- **Benchmarks**: Removed hardcoded 5% tau_init_steps calculations, now uses automatic calculation via `total_steps` parameter
+- **Benchmarks**: Fixed all benchmarks to use current CASMO interface (removed obsolete `log_level` and `tau_dead_zone` parameters)
+- **Benchmarks**: Renumbered benchmarks sequentially (b1-b5) after removing incomplete ones
+
+### Removed
+- **Benchmarks**: Removed incomplete benchmarks (b1_noisy_cifar10, b5_gan_stability) that had no reports
+- **Cache**: Cleaned up all `__pycache__` directories
+
 ## [0.2.0] - 2025-11-28
 
 ### Fixed
