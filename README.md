@@ -16,7 +16,7 @@ This approach yields state-of-the-art stability in challenging regimes such as *
 
 ---
 
-## � Key Innovation: The AGAR Mechanism
+## 💡 Key Innovation: The AGAR Mechanism
 
 The core of CASMO is the **Adaptive Gradient Alignment Ratio (AGAR)**, a metric that measures the consistency of gradient direction over a sliding window:
 
