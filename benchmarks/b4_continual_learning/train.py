@@ -209,10 +209,13 @@ def run_continual_learning(optimizer_name, tokenizer, epochs_per_task=3,
     
     # Create optimizer
     if optimizer_name == 'casmo':
+        # Calculate total steps for automatic calibration
+        total_steps = len(train_loader) * epochs_per_task * 4  # 4 tasks
+        
         optimizer = CASMO(
             model.parameters(),
             lr=lr,
-            tau_init_steps=100,  # Fast calibration
+            total_steps=total_steps,
             weight_decay=0.01,
             granularity='group',
             betas=(0.9, 0.999)

@@ -90,7 +90,10 @@ def run_benchmark(optimizer_name, device, train_loader, test_loader,
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     
-    optimizer = get_optimizer(model, optimizer_name, lr)
+    # Calculate total steps for CASMO calibration
+    total_steps = len(train_loader) * num_epochs
+    
+    optimizer = get_optimizer(model, optimizer_name, lr, total_steps=total_steps)
     
     # --- MAKE PRIVATE ---
     model, optimizer, train_loader, privacy_engine = make_private(

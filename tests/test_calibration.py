@@ -35,8 +35,7 @@ class TestCalibration:
         optimizer = CASMO(
             model.parameters(), 
             lr=1e-3, 
-            tau_init_steps=tau_init_steps,
-            log_level=0
+            tau_init_steps=tau_init_steps
         )
         
         # Run exactly tau_init_steps
@@ -65,8 +64,7 @@ class TestCalibration:
         optimizer = CASMO(
             model.parameters(), 
             lr=1e-3, 
-            tau_init_steps=50,  # Minimum
-            log_level=0
+            tau_init_steps=50  # Minimum
         )
         
         for i in range(50):
@@ -90,8 +88,7 @@ class TestCalibration:
             model.parameters(), 
             lr=1e-3, 
             tau_init_steps=50,
-            tau_clip_range=tau_clip_range,
-            log_level=0
+            tau_clip_range=tau_clip_range
         )
         
         for i in range(60):
@@ -117,8 +114,7 @@ class TestCalibration:
             model.parameters(), 
             lr=1e-3, 
             tau_init_steps=100,
-            c_min=0.1,  # Initial value
-            log_level=0
+            c_min=0.1  # Initial value
         )
         
         # Simulate bimodal AGAR distribution (alternating clean/noisy)
@@ -156,8 +152,7 @@ class TestCalibration:
             model.parameters(), 
             lr=1e-3, 
             tau_init_steps=100,
-            c_min=0.1,
-            log_level=0
+            c_min=0.1
         )
         
         # Simulate consistent noise (low CV, pervasive noise)
@@ -188,7 +183,7 @@ class TestCalibration:
     def test_distribution_statistics_computed(self):
         """Test that all distribution statistics are computed during calibration."""
         model = TinyModel()
-        optimizer = CASMO(model.parameters(), lr=1e-3, tau_init_steps=50, log_level=0)
+        optimizer = CASMO(model.parameters(), lr=1e-3, tau_init_steps=50)
         
         for i in range(60):
             x = torch.randn(16, 5)
@@ -219,58 +214,13 @@ class TestCalibration:
         assert 0.0 <= median <= 1.0
         assert p10 <= median <= p90
     
-    def test_tau_dead_zone(self):
-        """Test that tau dead zone prevents excessive adaptation."""
-        model = TinyModel()
-        tau_dead_zone = 0.3  # Large dead zone
-        optimizer = CASMO(
-            model.parameters(), 
-            lr=1e-3, 
-            tau_init_steps=50,
-            tau_dead_zone=tau_dead_zone,
-            log_level=0
-        )
-        
-        # Run calibration
-        for i in range(50):
-            x = torch.randn(16, 5)
-            y = torch.randint(0, 2, (16,))
-            
-            optimizer.zero_grad()
-            outputs = model(x)
-            loss = nn.functional.cross_entropy(outputs, y)
-            loss.backward()
-            optimizer.step()
-        
-        group_state = optimizer._group_states[0]
-        tau_before = group_state['tau_adapter'].tau
-        
-        # Run a few more steps with slightly different AGAR
-        for i in range(10):
-            x = torch.randn(16, 5)
-            y = torch.randint(0, 2, (16,))
-            
-            optimizer.zero_grad()
-            outputs = model(x)
-            loss = nn.functional.cross_entropy(outputs, y)
-            loss.backward()
-            optimizer.step()
-        
-        tau_after = group_state['tau_adapter'].tau
-        
-        # With large dead zone, tau should not change much
-        tau_change = abs(tau_after - tau_before)
-        assert tau_change < 0.1, \
-            f"Dead zone should prevent large tau changes, got change of {tau_change}"
-    
     def test_memorization_detection(self):
         """Test that tau adapter detects and prevents memorization."""
         model = TinyModel()
         optimizer = CASMO(
             model.parameters(), 
             lr=1e-3, 
-            tau_init_steps=50,
-            log_level=0
+            tau_init_steps=50
         )
         
         # Normal training to calibrate
@@ -307,7 +257,7 @@ class TestCalibration:
             {'params': [list(model.parameters())[1]], 'lr': 5e-4, 'tau_init_steps': 50}
         ]
         
-        optimizer = CASMO(param_groups, log_level=0)
+        optimizer = CASMO(param_groups)
         
         for i in range(60):
             x = torch.randn(16, 5)

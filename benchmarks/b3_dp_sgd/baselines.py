@@ -6,7 +6,7 @@ try:
 except ImportError:
     OPACUS_AVAILABLE = False
 
-def get_optimizer(model, optimizer_name, lr):
+def get_optimizer(model, optimizer_name, lr, total_steps=None):
     if optimizer_name == 'sgd':
         return optim.SGD(model.parameters(), lr=lr, momentum=0.9)
     elif optimizer_name == 'adamw':
@@ -19,7 +19,7 @@ def get_optimizer(model, optimizer_name, lr):
             lr=lr,
             weight_decay=1e-4,
             granularity='group',
-            tau_init_steps=100,
+            total_steps=total_steps,
             c_min=0.1
         )
     else:
