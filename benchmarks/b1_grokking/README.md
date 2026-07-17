@@ -1,4 +1,4 @@
-# B2: Grokking - Modular Arithmetic with Noise
+# B1: Grokking - Modular Arithmetic with Noise
 
 ## Overview
 

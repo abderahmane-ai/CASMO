@@ -1,8 +1,12 @@
 # Benchmark Report: Long-Tailed CIFAR-100 Classification
 
+> **⚠️ Historical (v0.3).** This report was produced with the v0.3 calibration-based
+> algorithm, which v0.4 replaced. It has not been re-run and does not describe current
+> behaviour. For current, reproducible v0.4 evidence see `research/REDESIGN.md`.
+
 **Date:** November 22, 2025
 **Author:** Abderahmane Ainouche
-**Benchmark ID:** B3
+**Benchmark ID:** B2
 
 ## Abstract
 

@@ -1,16 +1,35 @@
 # CASMO Benchmarks
 
-This directory contains comprehensive benchmarks demonstrating CASMO's effectiveness across diverse challenging scenarios where standard optimizers struggle.
+This directory contains large-scale benchmarks exercising CASMO in scenarios where standard
+optimizers struggle. They need a GPU and extra dependencies.
+
+> ### ⚠️ These results are historical (v0.3)
+>
+> Every number in the table below, and every report under `*/reports/`, was produced with
+> the **v0.3 calibration-based algorithm**. v0.4 replaced that algorithm entirely, and these
+> benchmarks have **not been re-run**. Do not cite them as current results.
+>
+> The current, reproducible evidence for v0.4 is
+> [`research/validate_redesign.py`](../research/validate_redesign.py) (runs in ~25s on CPU),
+> with the measurements and methodology in
+> [`research/REDESIGN.md`](../research/REDESIGN.md).
+>
+> The scripts themselves *have* been updated to the v0.4 API and each benchmark now sets a
+> `robustness` value matching its noise character, so they are ready to re-run.
 
 ## Overview
 
-| Benchmark | Domain | Challenge | Key Result | Status |
-|-----------|--------|-----------|------------|--------|
-| **B1** | Generalization | Grokking with 30% label noise | 90.4% vs 24.0% val acc | ✅ Complete |
-| **B2** | Long-Tail | CIFAR-100 imbalance (100:1) | Better tail-class accuracy | ✅ Complete |
-| **B3** | Privacy | DP-SGD (ε ≈ 0.37) | Maintains accuracy under DP | ✅ Complete |
-| **B4** | Continual Learning | Sequential LLM fine-tuning | 13% less forgetting | ✅ Complete |
-| **B5** | Finance | Portfolio optimization | Lower turnover, higher Sharpe | ✅ Complete |
+| Benchmark | Domain | Challenge | Key Result (v0.3, historical) | `robustness` |
+|-----------|--------|-----------|-------------------------------|--------------|
+| **B1** | Generalization | Grokking with 30% label noise | 90.4% vs 24.0% val acc | `1.0` |
+| **B2** | Long-Tail | CIFAR-100 imbalance (100:1) | Better tail-class accuracy | `1.0` |
+| **B3** | Privacy | DP-SGD (ε ≈ 0.37) | Maintains accuracy under DP | `0.5` |
+| **B4** | Continual Learning | Sequential LLM fine-tuning | 13% less forgetting | `1.0` |
+| **B5** | Finance | Portfolio optimization | Lower turnover, higher Sharpe | `1.0` |
+
+B3 uses a lower `robustness` deliberately: DP-SGD injects *isotropic* gradient noise, and
+measurement shows heavy absolute suppression hurts under a fixed privacy/step budget. See
+[REDESIGN.md §6](../research/REDESIGN.md).
 
 ## Quick Start
 

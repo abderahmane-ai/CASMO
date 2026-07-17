@@ -1,316 +1,137 @@
-# Frequently Asked Questions (FAQ)
+# FAQ
 
-## General Questions
+## Concepts
 
-### What is CASMO?
+### What does CASMO actually do differently from Adam?
 
-CASMO (Confident Adaptive Selective Momentum Optimizer) is a PyTorch optimizer that extends Adam with automatic gradient quality detection. It uses AGAR (Adaptive Gradient Alignment Ratio) to measure gradient consistency and adaptively scales learning rates based on signal-to-noise ratio.
+Adam adapts to gradient **magnitude** — it divides by `sqrt(E[g²])`. But a large `E[g²]`
+can come from a strong consistent signal *or* from large random fluctuations, and Adam
+cannot tell which. CASMO estimates the **variance** of the gradient separately and forms
+an explicit signal fraction, `AGAR = E[g]² / (E[g]² + Var[g])`, per coordinate. It then
+scales each coordinate's step by a confidence derived from that fraction.
 
-### How is CASMO different from Adam/AdamW?
+### What is AGAR?
 
-- **Adam/AdamW**: Treats all gradients equally
-- **CASMO**: Adapts learning rate based on gradient quality
-  - High-quality gradients → Full learning rate
-  - Noisy gradients → Reduced learning rate
+The Adaptive Gradient Alignment Ratio: the fraction of a coordinate's gradient power that
+is signal rather than noise. It is bounded in `[0, 1]` by construction — 1 means perfectly
+consistent gradients, 0 means directionless noise.
 
-### Is CASMO a drop-in replacement for AdamW?
+### What are `trust` and `focus`?
 
-Yes! CASMO uses the same interface as PyTorch optimizers:
+The two axes of the confidence map:
 
-```python
-# Replace this
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+- **trust** (absolute) = `c_min + (1-c_min)·mean(AGAR)` — one number per tensor. When the
+  gradients are mostly noise, this shrinks and the whole tensor slows down. This is what
+  resists memorizing label noise.
+- **focus** (relative) = `clip(AGAR_i / mean(AGAR), rel_floor, 1)` — per coordinate,
+  mean-normalized. It shifts the step toward reliable coordinates without changing the
+  overall pace. This is what preserves speed and stability.
 
-# With this
-optimizer = CASMO(model.parameters(), lr=1e-3)
-```
+They are combined as `C_i = trust**robustness * focus_i`.
 
-## Performance Questions
+### Why is `robustness` a knob instead of automatic?
 
-### Is CASMO slower than AdamW?
+Because measurement showed that different noise types want **opposite** policies. Label
+noise rewards slowing down globally; isotropic gradient noise (DP-SGD) punishes it under a
+fixed step budget. No single value is right for both, so CASMO exposes the choice rather
+than guessing. See [REDESIGN.md §6](../research/REDESIGN.md).
 
-Slightly (~5% with `granularity='group'`), but the overhead is constant and doesn't scale with model size. For most applications, the difference is negligible.
+---
 
-### Does CASMO use more memory?
-
-Yes, about 5% more memory to store AGAR statistics. This is minimal compared to model parameters and activations.
-
-### When does CASMO outperform AdamW?
-
-CASMO excels in:
-- **Noisy labels** (10-30%+ improvement)
-- **Imbalanced data** (5-15% better on tail classes)
-- **Continual learning** (10-20% less forgetting)
-- **Differential privacy** (maintains accuracy under noise)
-- **Unstable training** (GANs, RL)
-
-On clean, well-curated data, CASMO performs similarly to AdamW.
-
-## Usage Questions
+## Usage
 
 ### What learning rate should I use?
 
-Use the same learning rate you would use with AdamW:
-- **Training from scratch**: 1e-3 to 0.1
-- **Fine-tuning**: 1e-5 to 5e-4
-- **LLMs**: 1e-5 to 2e-4
+The one you already use for AdamW. CASMO tolerates aggressive LRs better than Adam
+(measured 36 vs. 70 steps to converge at `lr=3e-2`), so if instability currently caps your
+LR, try raising it.
 
-CASMO adapts automatically, so you don't need to tune the LR differently.
+### My training loss decreases more slowly than with Adam. Is it broken?
 
-### Should I use 'group' or 'parameter' granularity?
+Almost certainly not — that is the mechanism working. At `robustness=1.0`, CASMO
+deliberately refuses to drive the training loss to zero when the data contains noise. On
+30% label noise it reaches 0.850 train accuracy where AdamW reaches 1.000, and its
+**test** accuracy is 12 points higher as a result.
 
-**Use `'group'` (default)** for most cases:
-- Faster (~5% overhead vs ~15%)
-- Sufficient for most tasks
-- Recommended for production
+Judge CASMO on validation metrics, not training loss. If validation is also worse on
+genuinely clean data, lower `robustness` toward `0`.
 
-**Use `'parameter'`** only if:
-- You need fine-grained control
-- You're debugging gradient issues
-- Speed is not a concern
-
-### What is tau_init_steps and how should I set it?
-
-`tau_init_steps` is the calibration period where CASMO learns the gradient distribution.
-
-**Recommendation**: Don't set it manually. Instead, provide `total_steps`:
+### How do I make CASMO behave exactly like AdamW?
 
 ```python
-total_steps = len(train_loader) * num_epochs
-optimizer = CASMO(model.parameters(), lr=1e-3, total_steps=total_steps)
+CASMO(model.parameters(), lr=1e-3, robustness=0.0, rel_floor=1.0)
 ```
 
-CASMO will automatically calculate optimal `tau_init_steps`.
+`trust**0 == 1` and `focus == 1`, so `C_i == 1`.
 
-### What is c_min and how should I set it?
+### Does it work with LR schedulers / AMP / gradient accumulation / DDP?
 
-`c_min` is the minimum confidence floor (range: 0-1).
+Yes to schedulers, gradient accumulation, and parameter groups — CASMO is an ordinary
+`torch.optim.Optimizer` subclass. AMP works through `GradScaler` normally (the scaler
+checks for inf/nan and skips the step before CASMO sees it). DDP works; CASMO's statistics
+are computed per-rank from the already-reduced gradients.
 
-**Guidelines**:
-- `c_min=0.1`: High noise (30%+ label corruption) - aggressive suppression
-- `c_min=0.3`: Moderate noise (10-30%) - balanced
-- `c_min=0.5`: Low noise or clean data - conservative
+### Can I use it with sparse gradients?
 
-**Default**: 0.1 (works well for most noisy scenarios)
+No — `NotImplementedError`. Use `torch.optim.SparseAdam`, or densify with
+`grad.to_dense()`.
 
-### Can I use CASMO with learning rate schedulers?
-
-Yes! CASMO works with all PyTorch schedulers:
+### How do I see what the optimizer thinks of my gradients?
 
 ```python
-optimizer = CASMO(model.parameters(), lr=0.1)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
-
-for epoch in range(num_epochs):
-    train(model, optimizer)
-    scheduler.step()
+m = optimizer.group_metrics(0)
+print(m["agar"], m["confidence"])
 ```
 
-### Can I use CASMO with gradient clipping?
+---
 
-Yes:
+## Performance
 
-```python
-optimizer = CASMO(model.parameters(), lr=1e-3)
+### What does it cost?
 
-for batch in dataloader:
-    optimizer.zero_grad()
-    loss = model(batch)
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
-```
+- **Memory:** the same as Adam — verified identical. Two EMAs per parameter (`m`, `s`). The
+  Adam denominator `sqrt(E[g²])` is reconstructed as `sqrt(m̂² + ŝ)` rather than tracked
+  separately.
+- **Time:** ~1.9× Adam per step (measured ratio 1.88× on a 512→1024→1024→128 MLP; absolute
+  timings vary by machine, the ratio is stable). That is the intrinsic cost of
+  per-coordinate variance tracking plus the elementwise gate. It is ~14% faster than
+  CASMO v0.3, which additionally paid for per-parameter host syncs and numpy calibration.
 
-### Can I use CASMO with mixed precision (AMP)?
+Note that wall-clock per step is rarely the binding constraint: the optimizer step is
+usually small next to forward/backward. Measure end-to-end before worrying about it.
 
-Yes:
+### Why not check for NaN gradients by default?
 
-```python
-from torch.cuda.amp import autocast, GradScaler
+The check (`isnan().any()`) forces a host-device synchronization every step, for every
+parameter. v0.3 did this and paid for it. Set `nan_guard=True` if you want it.
 
-optimizer = CASMO(model.parameters(), lr=1e-3)
-scaler = GradScaler()
-
-for batch in dataloader:
-    optimizer.zero_grad()
-    with autocast():
-        loss = model(batch)
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-```
-
-## Technical Questions
-
-### How does AGAR work?
-
-AGAR measures gradient consistency:
-
-```
-AGAR = ||E[g]||² / (||E[g]||² + Var[g])
-```
-
-- **Numerator**: Signal power (consistent direction)
-- **Denominator**: Total power (signal + noise)
-- **Range**: 0 (pure noise) to 1 (pure signal)
-
-### What happens during calibration?
-
-During the first `tau_init_steps` steps, CASMO:
-1. Collects AGAR samples
-2. Computes distribution statistics (mean, std, median)
-3. Sets adaptive thresholds
-4. Determines optimal `c_min` based on noise level
-
-After calibration, these parameters are frozen.
-
-### Can I monitor AGAR during training?
-
-Yes:
-
-```python
-optimizer = CASMO(model.parameters(), lr=1e-3)
-
-for batch in dataloader:
-    optimizer.zero_grad()
-    loss = model(batch)
-    loss.backward()
-    optimizer.step()
-    
-    # Access AGAR
-    group_state = optimizer._group_states[0]
-    agar = group_state.get('current_agar')
-    confidence = group_state.get('current_confidence')
-    
-    if agar is not None:
-        print(f"AGAR: {agar:.4f}, Confidence: {confidence:.4f}")
-```
-
-### Does CASMO support sparse gradients?
-
-No, sparse gradients are not currently supported. CASMO will raise a `NotImplementedError` if it encounters sparse gradients.
-
-### Can I use CASMO with distributed training?
-
-Yes, CASMO works with PyTorch's distributed training:
-
-```python
-model = torch.nn.parallel.DistributedDataParallel(model)
-optimizer = CASMO(model.parameters(), lr=1e-3)
-```
-
-### Can I use different hyperparameters for different layers?
-
-Yes, use parameter groups:
-
-```python
-optimizer = CASMO([
-    {'params': model.encoder.parameters(), 'lr': 1e-4},
-    {'params': model.decoder.parameters(), 'lr': 1e-3}
-], weight_decay=0.01)
-```
+---
 
 ## Troubleshooting
 
-### My model is not learning
+### `TypeError: CASMO got an unexpected keyword argument`
 
-**Check**:
-1. Learning rate is appropriate (not too low)
-2. `c_min` is not too low (try 0.3 or 0.5)
-3. Provide `total_steps` for better calibration
-4. Verify gradients are flowing (check with `torch.autograd.grad`)
+You passed a name CASMO does not recognise. Check spelling against the
+[API reference](api-reference.md).
 
-### I'm getting NaN/Inf errors
+### `DeprecationWarning: 'granularity' is deprecated and ignored since v0.4.0`
 
-CASMO automatically detects NaN/Inf. If you see errors:
-1. Reduce learning rate
-2. Add gradient clipping
-3. Check input normalization
-4. Verify model architecture (no division by zero, etc.)
+You are passing a v0.3 calibration parameter. It is safely ignored. Remove it, and set
+`robustness` instead — see the [migration guide](migration-guide.md).
 
-### Training is slower than expected
+### `ValueError: optimizer got an empty parameter list`
 
-**Solutions**:
-1. Use `granularity='group'` (default)
-2. Ensure you're using GPU if available
-3. Check if other bottlenecks exist (data loading, etc.)
+Your model has no trainable parameters, or you passed an exhausted generator. Pass
+`model.parameters()` directly, not a generator you already consumed.
 
-### Results differ from AdamW
+### Loading a v0.3 checkpoint fails
 
-**Expected behavior**:
-- On clean data: Similar to AdamW
-- On noisy data: Better than AdamW (this is the goal!)
-- During calibration: May differ slightly
+v0.3 and v0.4 store different state (`exp_avg`/`exp_avg_sq` + `_group_states` vs. `m`/`s`).
+Optimizer state is not portable across the redesign. Reload the model weights and start a
+fresh optimizer.
 
-If results are worse:
-1. Try adjusting `c_min` (0.3 or 0.5)
-2. Ensure `total_steps` is provided
-3. Check if your data is actually noisy
+### Training diverges
 
-### Checkpoint loading fails
-
-If loading an AdamW checkpoint into CASMO:
-```python
-# Load model weights
-model.load_state_dict(checkpoint['model'])
-
-# Create new CASMO optimizer (don't load optimizer state)
-optimizer = CASMO(model.parameters(), lr=1e-3)
-```
-
-CASMO will recalibrate automatically.
-
-## Comparison Questions
-
-### CASMO vs Adam
-
-- **Adam**: No weight decay, older algorithm
-- **CASMO**: Based on AdamW (decoupled weight decay) + AGAR
-
-Use CASMO instead of Adam.
-
-### CASMO vs AdamW
-
-- **AdamW**: Standard, well-tested, fast
-- **CASMO**: Noise-robust, adaptive, slightly slower
-
-Use CASMO when you have noisy/challenging data.
-
-### CASMO vs SGD
-
-- **SGD**: Simple, requires careful tuning, no adaptive LR
-- **CASMO**: Adaptive, automatic noise handling, easier to use
-
-CASMO is generally better for most tasks.
-
-### CASMO vs other noise-robust methods
-
-- **Data cleaning**: Requires manual effort, may remove useful data
-- **Robust loss functions**: Task-specific, requires tuning
-- **CASMO**: Automatic, optimizer-level, works with any loss
-
-CASMO is complementary to other methods.
-
-## Best Practices
-
-### For best results:
-
-1. ✅ Provide `total_steps`
-2. ✅ Use `granularity='group'`
-3. ✅ Keep same hyperparameters as AdamW
-4. ✅ Adjust `c_min` based on noise level
-5. ✅ Monitor AGAR during training (optional)
-
-### Avoid:
-
-1. ❌ Very short training runs (<100 steps)
-2. ❌ Sparse gradients (not supported)
-3. ❌ Manually setting `tau_init_steps` (let CASMO auto-calculate)
-4. ❌ Using `granularity='parameter'` unless necessary
-
-## Still Have Questions?
-
-- Check the [Getting Started Guide](getting-started.md)
-- Review [Examples](../examples/)
-- Read the [API Reference](api-reference.md)
-- Open an [issue](https://github.com/abderahmane-ai/CASMO/issues)
+Lower the LR, or raise `robustness` — the absolute axis contracts the step when the signal
+degrades and generally improves stability. If gradients are genuinely exploding, use
+`torch.nn.utils.clip_grad_norm_` and consider `nan_guard=True` to fail loudly.

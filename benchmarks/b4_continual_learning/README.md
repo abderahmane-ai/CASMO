@@ -1,4 +1,4 @@
-# B7: Continual Learning & Catastrophic Forgetting
+# B4: Continual Learning & Catastrophic Forgetting
 
 ## Overview
 
@@ -21,7 +21,7 @@ This benchmark evaluates CASMO's ability to prevent **catastrophic forgetting** 
 In real-world deployment, LLMs need to be updated continuously (e.g., new coding libraries, new news events). Retraining from scratch is prohibitively expensive. Sequential fine-tuning is efficient but risky due to forgetting.
 
 ### How CASMO Addresses This
-CASMO uses **Adaptive Gradient-Aware Regularization (AGAR)** to detect when new gradients conflict with existing knowledge:
+CASMO uses **Adaptive Gradient Alignment Ratio (AGAR)** to detect when new gradients conflict with existing knowledge:
 - **Conflicting Gradients**: Indicate a risk of overwriting useful weights → Low AGAR → CASMO reduces learning rate for those parameters.
 - **Aligned Gradients**: Indicate compatible knowledge → High AGAR → CASMO allows normal learning.
 
@@ -44,7 +44,7 @@ CASMO uses **Adaptive Gradient-Aware Regularization (AGAR)** to detect when new 
 - **Epochs per Task**: 2
 - **Optimizer**: CASMO vs AdamW
 
-## Results: B7 Continual Learning
+## Results: B4 Continual Learning
 
 | Metric | CASMO | AdamW | Difference |
 |--------|-------|-------|------------|
@@ -54,7 +54,7 @@ CASMO uses **Adaptive Gradient-Aware Regularization (AGAR)** to detect when new 
 
 ### Key Findings
 1. **Stability**: CASMO demonstrated **13% less forgetting** than AdamW.
-# B7: Continual Learning & Catastrophic Forgetting
+# B4: Continual Learning & Catastrophic Forgetting
 
 ## Overview
 
@@ -77,7 +77,7 @@ This benchmark evaluates CASMO's ability to prevent **catastrophic forgetting** 
 In real-world deployment, LLMs need to be updated continuously (e.g., new coding libraries, new news events). Retraining from scratch is prohibitively expensive. Sequential fine-tuning is efficient but risky due to forgetting.
 
 ### How CASMO Addresses This
-CASMO uses **Adaptive Gradient-Aware Regularization (AGAR)** to detect when new gradients conflict with existing knowledge:
+CASMO uses **Adaptive Gradient Alignment Ratio (AGAR)** to detect when new gradients conflict with existing knowledge:
 - **Conflicting Gradients**: Indicate a risk of overwriting useful weights → Low AGAR → CASMO reduces learning rate for those parameters.
 - **Aligned Gradients**: Indicate compatible knowledge → High AGAR → CASMO allows normal learning.
 
@@ -100,7 +100,7 @@ CASMO uses **Adaptive Gradient-Aware Regularization (AGAR)** to detect when new 
 - **Epochs per Task**: 2
 - **Optimizer**: CASMO vs AdamW
 
-## Results: B7 Continual Learning
+## Results: B4 Continual Learning
 
 | Metric | CASMO | AdamW | Difference |
 |--------|-------|-------|------------|

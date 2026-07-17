@@ -1,4 +1,4 @@
-# B8: Robust Portfolio Optimization (Finance)
+# B5: Robust Portfolio Optimization (Finance)
 
 > **"Can an optimizer act as a risk-aware portfolio manager?"**
 

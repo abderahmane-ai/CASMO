@@ -57,13 +57,11 @@ optimizer = CASMO(model.parameters(), lr=1e-3, weight_decay=0.01)
 For best results, provide `total_steps` for automatic calibration:
 
 ```python
-total_steps = len(train_loader) * num_epochs
 optimizer = CASMO(
     model.parameters(),
     lr=1e-3,
     weight_decay=0.01,
-    granularity='group',  # Recommended for efficiency
-    total_steps=total_steps
+    robustness=1.0,  # 0 = AdamW-like pace, 1 = maximally noise robust
 )
 ```
 

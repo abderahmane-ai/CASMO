@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "casmo-optimizer"
-version = "0.3.0"
-description = "Noise-robust PyTorch optimizer with automatic confidence-based learning rate adaptation"
+version = "0.4.0"
+description = "Noise-robust PyTorch optimizer that scales each update by its gradient signal-to-noise ratio"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
     {name = "Abderahmane Ainouche", email = "abderahmane.ainouche.ai@gmail.com"}
 ]
-keywords = ["pytorch", "optimizer", "adam", "noise-robust", "machine-learning", "deep-learning"]
+keywords = ["pytorch", "optimizer", "adam", "adamw", "noise-robust", "label-noise", "machine-learning", "deep-learning"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -25,11 +25,12 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
+# casmo.py imports only torch and the stdlib.
 dependencies = [
     "torch>=1.10.0",
-    "numpy>=1.20.0",
 ]
 
 [project.optional-dependencies]
@@ -37,20 +38,28 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=3.0.0",
     "black>=22.0.0",
-    "flake8>=4.0.0",
-    "mypy>=0.950",
+    "ruff>=0.1.0",
+    "numpy>=1.20.0",
 ]
 benchmarks = [
     "torchvision>=0.11.0",
     "matplotlib>=3.5.0",
     "transformers>=4.20.0",
     "datasets>=2.0.0",
+    "numpy>=1.20.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/abderahmane-ai/CASMO"
+Documentation = "https://github.com/abderahmane-ai/CASMO/blob/main/docs/README.md"
+Changelog = "https://github.com/abderahmane-ai/CASMO/blob/main/CHANGELOG.md"
 "Bug Reports" = "https://github.com/abderahmane-ai/CASMO/issues"
 Source = "https://github.com/abderahmane-ai/CASMO"
+
+# CASMO is a single module, not a package. Declared explicitly so the build does
+# not fall back to auto-discovery on this flat layout.
+[tool.setuptools]
+py-modules = ["casmo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

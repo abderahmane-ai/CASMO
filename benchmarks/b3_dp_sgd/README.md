@@ -1,4 +1,4 @@
-# B4: Differential Privacy - DP-SGD on CIFAR-10
+# B3: Differential Privacy - DP-SGD on CIFAR-10
 
 ## Overview
 

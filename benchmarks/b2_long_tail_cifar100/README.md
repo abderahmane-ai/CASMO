@@ -1,4 +1,4 @@
-# B3: Long-Tail Recognition - CIFAR-100
+# B2: Long-Tail Recognition - CIFAR-100
 
 ## Overview
 

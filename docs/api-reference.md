@@ -1,18 +1,6 @@
 # API Reference
 
-Complete reference for the CASMO optimizer.
-
-## CASMO Class
-
-```python
-class CASMO(torch.optim.Optimizer)
-```
-
-Confident Adaptive Selective Momentum Optimizer.
-
-Extends Adam with confidence-based learning rate scaling using AGAR (Adaptive Gradient Alignment Ratio) metrics. Automatically adapts to gradient signal-to-noise ratio for improved convergence in noisy environments.
-
-### Constructor
+## `casmo.CASMO`
 
 ```python
 CASMO(
@@ -21,293 +9,135 @@ CASMO(
     betas=(0.9, 0.999),
     eps=1e-8,
     weight_decay=0.0,
-    tau_init_steps=None,
-    tau_clip_range=(0.01, 0.5),
     c_min=0.1,
-    granularity='group',
-    agar_clamp_factor=10.0,
-    total_steps=None
+    robustness=0.5,
+    rel_floor=0.1,
+    nan_guard=False,
 )
 ```
 
+A drop-in replacement for `torch.optim.AdamW` that scales every update by a
+per-coordinate confidence derived from the gradient signal-to-noise ratio.
+
+Subclasses `torch.optim.Optimizer`, so it works with LR schedulers, parameter groups,
+`state_dict()` / `load_state_dict()`, and closures exactly like any built-in optimizer.
+
+---
+
 ### Parameters
 
-#### Required Parameters
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `params` | iterable | — | Parameters or parameter-group dicts. |
+| `lr` | float | `1e-3` | Learning rate. Must be `>= 0`. |
+| `betas` | (float, float) | `(0.9, 0.999)` | EMA coefficients for the first moment `m` and the belief variance `s`. Each must be in `[0, 1)`. |
+| `eps` | float | `1e-8` | Numerical stability term. Must be `>= 0`. |
+| `weight_decay` | float | `0.0` | Decoupled (AdamW-style) weight decay. Must be `>= 0`. |
+| `c_min` | float | `0.1` | Floor of the absolute **trust** factor. Must be in `[0, 1]`. Prevents the effective LR collapsing under sustained noise. |
+| `robustness` | float | `0.5` | Exponent on the trust factor. Must be `>= 0`. `0` disables absolute suppression (AdamW-like pace); `1` is maximally noise robust. |
+| `rel_floor` | float | `0.1` | Floor of the relative **focus** factor. Must be in `[0, 1]`. Bounds how far a single coordinate can be down-weighted. `1.0` disables focus. |
+| `nan_guard` | bool | `False` | Raise `RuntimeError` on non-finite gradients. Off by default because the check forces a host-device sync every step. |
 
-**`params`** (iterable)
-- Iterable of parameters to optimize or dicts defining parameter groups
-- Same as PyTorch's standard optimizers
+All parameters except `params` can be set **per parameter group**.
 
-#### Learning Parameters
+### Raises
 
-**`lr`** (float, default: `1e-3`)
-- Learning rate
-- Typical range: `1e-5` to `0.1`
-- Use lower values for fine-tuning, higher for training from scratch
+| Exception | When |
+|---|---|
+| `ValueError` | A hyper-parameter is outside its valid range, or `params` is empty. |
+| `TypeError` | An unrecognised keyword argument is passed. |
+| `NotImplementedError` | A sparse gradient is encountered. Use `torch.optim.SparseAdam`. |
+| `RuntimeError` | `nan_guard=True` and a NaN/Inf gradient is seen. |
+| `DeprecationWarning` | A removed v0.3 calibration kwarg is passed (see below). |
 
-**`betas`** (Tuple[float, float], default: `(0.9, 0.999)`)
-- Coefficients for computing running averages of gradient and its square
-- `beta1`: First moment decay rate (momentum)
-- `beta2`: Second moment decay rate (variance)
-- Typical range: `beta1` in `[0.8, 0.95]`, `beta2` in `[0.99, 0.9999]`
-
-**`eps`** (float, default: `1e-8`)
-- Term added to denominator for numerical stability
-- Rarely needs adjustment
-
-**`weight_decay`** (float, default: `0.0`)
-- Decoupled weight decay coefficient (L2 regularization)
-- Typical range: `0.0` to `0.1`
-- Use `0.01` for most tasks, `0.0` for tasks without regularization
-
-#### AGAR Configuration
-
-**`tau_init_steps`** (int, optional, default: `None`)
-- Number of steps for initial AGAR calibration
-- If `None`, automatically calculated as: `max(500, int(50 / (1 - beta1)))`
-- If `total_steps` is provided, capped at `total_steps // 5`
-- Minimum value: `50`
-- **Recommendation**: Let CASMO auto-calculate by providing `total_steps`
-
-**`tau_clip_range`** (Tuple[float, float], default: `(0.01, 0.5)`)
-- Min/max bounds for tau (AGAR threshold)
-- Prevents extreme threshold values
-- Rarely needs adjustment
-
-**`c_min`** (float, default: `0.1`)
-- Minimum confidence scaling factor
-- Range: `[0.0, 1.0]`
-- Lower values = more aggressive noise suppression
-- Higher values = more conservative (closer to Adam)
-- **Recommendations**:
-  - `0.1`: High noise scenarios (30%+ label noise)
-  - `0.3`: Moderate noise
-  - `0.5`: Low noise or when unsure
-
-**`granularity`** (str, default: `'group'`)
-- AGAR computation granularity
-- Options:
-  - `'group'`: Single AGAR per parameter group (faster, recommended)
-  - `'parameter'`: Per-parameter AGAR (more precise, slower)
-- **Recommendation**: Use `'group'` unless you need fine-grained control
-
-**`agar_clamp_factor`** (float, optional, default: `10.0`)
-- Outlier clamping factor for AGAR computation
-- Clamps gradients to `mean ± factor * std`
-- Set to `None` to disable clamping
-- Helps handle gradient spikes
-
-**`total_steps`** (int, optional, default: `None`)
-- Total number of training steps
-- Enables optimal automatic calibration
-- **Highly recommended** to provide this parameter
-- Calculate as: `len(train_loader) * num_epochs`
+---
 
 ### Methods
 
 #### `step(closure=None)`
 
-Performs a single optimization step.
+Performs a single optimization step. Returns the closure's loss if one is given.
 
-**Parameters:**
-- `closure` (callable, optional): A closure that reevaluates the model and returns the loss
+#### `group_metrics(group_idx=0)`
 
-**Returns:**
-- Loss value if `closure` is provided, otherwise `None`
+Returns the most recent optimizer view of gradient quality for a parameter group:
 
-**Example:**
 ```python
-optimizer.zero_grad()
-loss = model(batch)
-loss.backward()
-optimizer.step()
+{"agar": float | None, "confidence": float | None}
 ```
 
-#### `zero_grad(set_to_none=False)`
+- `agar` — mean per-coordinate signal fraction across the group, in `[0, 1]`.
+- `confidence` — mean applied confidence multiplier `C_i`, in `[0, 1]`.
 
-Sets gradients of all optimized parameters to zero.
-
-**Parameters:**
-- `set_to_none` (bool, default: `False`): If `True`, sets gradients to `None` instead of zero (more memory efficient)
-
-**Example:**
-```python
-optimizer.zero_grad()
-# or
-optimizer.zero_grad(set_to_none=True)
-```
-
-#### `state_dict()`
-
-Returns the state of the optimizer as a dict.
-
-**Returns:**
-- Dictionary containing optimizer state
-
-**Example:**
-```python
-checkpoint = {
-    'model': model.state_dict(),
-    'optimizer': optimizer.state_dict(),
-    'epoch': epoch
-}
-torch.save(checkpoint, 'checkpoint.pt')
-```
-
-#### `load_state_dict(state_dict)`
-
-Loads the optimizer state.
-
-**Parameters:**
-- `state_dict` (dict): Optimizer state (returned by `state_dict()`)
-
-**Example:**
-```python
-checkpoint = torch.load('checkpoint.pt')
-optimizer.load_state_dict(checkpoint['optimizer'])
-```
-
-### Attributes
-
-#### `param_groups`
-
-List of parameter groups. Each group is a dict containing:
-- `params`: List of parameters
-- `lr`: Learning rate for this group
-- `weight_decay`: Weight decay for this group
-- All other hyperparameters
-
-**Example:**
-```python
-# Different learning rates for different layers
-optimizer = CASMO([
-    {'params': model.base.parameters(), 'lr': 1e-4},
-    {'params': model.head.parameters(), 'lr': 1e-3}
-])
-```
-
-#### `_group_states`
-
-Internal dictionary containing per-group AGAR statistics:
-- `current_agar`: Current AGAR value
-- `current_confidence`: Current confidence score
-- `tau`: Calibrated threshold
-- `agar_mean`, `agar_std`: Distribution statistics
-
-**Example:**
-```python
-# Access AGAR for monitoring
-group_state = optimizer._group_states[0]
-agar = group_state.get('current_agar')
-confidence = group_state.get('current_confidence')
-```
-
-## Usage Examples
-
-### Basic Usage
+Both are `None` before the first `step()`. Values are recomputed **every** step.
 
 ```python
-from casmo import CASMO
-
-optimizer = CASMO(model.parameters(), lr=1e-3, weight_decay=0.01)
-
-for batch in dataloader:
+for batch in loader:
     optimizer.zero_grad()
-    loss = model(batch)
-    loss.backward()
+    loss_fn(model(batch)).backward()
     optimizer.step()
+    m = optimizer.group_metrics(0)
+    logger.log({"agar": m["agar"], "confidence": m["confidence"]})
 ```
 
-### With Total Steps (Recommended)
+#### `state_dict()` / `load_state_dict(state_dict)`
+
+Standard PyTorch semantics. Per-parameter state is `{"step", "m", "s"}` — two EMAs, the
+same footprint as Adam. Resuming from a checkpoint reproduces uninterrupted training
+exactly.
+
+---
+
+### The `robustness` dial
+
+`robustness` (ρ) is the exponent on the absolute trust factor:
+
+```
+C_i = trust**robustness * focus_i
+```
+
+| Value | Behaviour | Use when |
+|---|---|---|
+| `0.0` | Pure relative reweighting; AdamW-like pace | Clean data, DP-SGD, maximum speed |
+| `0.5` *(default)* | Balanced | General purpose; best at aggressive LR |
+| `1.0` | Full absolute suppression | Label noise, long-tail, task conflict |
+
+Measured trade-off (5 seeds, see [`research/REDESIGN.md`](../research/REDESIGN.md)):
+
+| ρ | clean steps | label-noise 30% test | grad-noise σ=0.5 test |
+|---|---|---|---|
+| Adam | 82 | 0.675 | 0.641 |
+| 0.0 | 90 | 0.675 | 0.623 |
+| 0.5 | 160 | 0.701 | 0.488 |
+| 1.0 | 322 | **0.797** | 0.396 |
+
+Higher ρ trades raw training-loss speed for resistance to noise. It does **not** cost
+clean-data generalization (test accuracy is flat at 0.931–0.934 across ρ).
+
+---
+
+### Reducing exactly to AdamW
 
 ```python
-total_steps = len(train_loader) * num_epochs
-
-optimizer = CASMO(
-    model.parameters(),
-    lr=1e-3,
-    weight_decay=0.01,
-    total_steps=total_steps
-)
+CASMO(model.parameters(), lr=1e-3, robustness=0.0, rel_floor=1.0)
 ```
 
-### Multiple Parameter Groups
+With `robustness=0`, `trust**0 == 1`; with `rel_floor=1.0`, `focus == 1`. So `C_i == 1`
+and the update rule is AdamW's.
 
-```python
-optimizer = CASMO([
-    {'params': model.encoder.parameters(), 'lr': 1e-4},
-    {'params': model.decoder.parameters(), 'lr': 1e-3},
-    {'params': model.head.parameters(), 'lr': 5e-3}
-], weight_decay=0.01)
-```
+---
 
-### High Noise Scenario
+### Deprecated parameters (removed in v0.4)
 
-```python
-optimizer = CASMO(
-    model.parameters(),
-    lr=1e-3,
-    weight_decay=0.01,
-    c_min=0.1,  # Aggressive noise suppression
-    granularity='group'
-)
-```
+These were part of the v0.3 calibration design. They are accepted with a
+`DeprecationWarning` and **ignored**:
 
-### Fine-tuning LLMs
+| Removed | Why |
+|---|---|
+| `tau_init_steps` | No calibration phase exists; AGAR is on an absolute scale. |
+| `tau_clip_range` | No threshold to clip. |
+| `granularity` | The gate is always per-coordinate. |
+| `agar_clamp_factor` | AGAR is bounded in `[0, 1]` by construction. |
+| `total_steps` | Only ever used to size the calibration phase. |
 
-```python
-optimizer = CASMO(
-    model.parameters(),
-    lr=2e-4,  # Lower LR for fine-tuning
-    weight_decay=0.01,
-    betas=(0.9, 0.999),
-    total_steps=len(train_loader) * num_epochs
-)
-```
-
-## Exceptions
-
-### `ValueError`
-
-Raised when invalid parameters are provided:
-
-- `lr < 0`: Invalid learning rate
-- `eps < 0`: Invalid epsilon
-- `betas[0]` or `betas[1]` not in `[0, 1)`: Invalid beta values
-- `weight_decay < 0`: Invalid weight decay
-- `c_min` not in `[0, 1]`: Invalid c_min
-- `granularity` not in `['parameter', 'group']`: Invalid granularity
-- `tau_init_steps < 50`: Too few calibration steps
-
-### `RuntimeError`
-
-Raised during optimization:
-
-- NaN or Inf gradients detected
-- Sparse gradients encountered (not supported)
-
-## Performance Considerations
-
-### Speed
-
-- **Group granularity**: ~5% slower than AdamW
-- **Parameter granularity**: ~15% slower than AdamW
-
-### Memory
-
-- Additional memory: ~5% over AdamW
-- Stores AGAR statistics per group/parameter
-
-### Recommendations
-
-1. Use `granularity='group'` for best speed/accuracy tradeoff
-2. Provide `total_steps` for optimal calibration
-3. Use `c_min=0.1` for high noise, `0.3` for moderate noise
-4. Monitor AGAR values during training for insights
-
-## See Also
-
-- [Getting Started Guide](getting-started.md)
-- [Migration Guide](migration-guide.md)
-- [Theory Paper](../CASMO_THEORY.md)
-- [Examples](../examples/)
+Passing an unrecognised kwarg raises `TypeError`.

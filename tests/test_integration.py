@@ -1,251 +1,157 @@
-"""
-Integration tests for CASMO optimizer.
+"""End-to-end integration tests: convergence, parity with Adam, real training loops."""
 
-Tests end-to-end training scenarios to ensure CASMO converges correctly
-and produces results competitive with Adam/AdamW.
-"""
-
-import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import TensorDataset, DataLoader
-import sys
-import os
+from torch.utils.data import DataLoader, TensorDataset
 
-# Add parent dir to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from casmo import CASMO
 
 
 class SimpleMLP(nn.Module):
-    """Simple 2-layer MLP for testing."""
     def __init__(self, input_dim=10, hidden_dim=32, output_dim=2):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
-    
+
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
+        return self.fc2(F.relu(self.fc1(x)))
 
 
-def create_synthetic_dataset(n_samples=1000, input_dim=10, n_classes=2, noise_level=0.0):
-    """Create a simple synthetic classification dataset."""
-    torch.manual_seed(42)
-    X = torch.randn(n_samples, input_dim)
-    
-    # Simple linear boundary
-    weights = torch.randn(input_dim)
-    logits = X @ weights
-    y = (logits > 0).long()
-    
-    # Add label noise if requested
-    if noise_level > 0:
-        n_noisy = int(n_samples * noise_level)
-        noisy_indices = torch.randperm(n_samples)[:n_noisy]
-        y[noisy_indices] = 1 - y[noisy_indices]
-    
-    return TensorDataset(X, y)
+def make_dataset(n_samples=500, input_dim=10, seed=42):
+    torch.manual_seed(seed)
+    x = torch.randn(n_samples, input_dim)
+    w = torch.randn(input_dim)
+    y = ((x @ w) > 0).long()
+    return TensorDataset(x, y)
 
 
-def train_model(model, optimizer, dataloader, epochs=10):
-    """Train model and return final loss."""
+def train(model, optimizer, loader, epochs=20):
     model.train()
     criterion = nn.CrossEntropyLoss()
-    
-    for epoch in range(epochs):
-        total_loss = 0
-        for X, y in dataloader:
+    total = 0.0
+    for _ in range(epochs):
+        total = 0.0
+        for x, y in loader:
             optimizer.zero_grad()
-            outputs = model(X)
-            loss = criterion(outputs, y)
+            loss = criterion(model(x), y)
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
-    
-    return total_loss / len(dataloader)
+            total += loss.item()
+    return total / len(loader)
 
 
 class TestIntegration:
-    """Integration tests for CASMO optimizer."""
-    
-    def test_basic_convergence(self):
-        """Test that CASMO converges on a simple problem."""
-        dataset = create_synthetic_dataset(n_samples=500)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
+    def test_converges_on_simple_problem(self):
+        loader = DataLoader(make_dataset(), batch_size=32, shuffle=True)
+        torch.manual_seed(42)
         model = SimpleMLP()
-        optimizer = CASMO(model.parameters(), lr=1e-3)
-        
-        final_loss = train_model(model, optimizer, dataloader, epochs=20)
-        
-        # Should achieve low loss on this simple problem
-        assert final_loss < 0.5, f"Expected final loss < 0.5, got {final_loss}"
-    
-    def test_casmo_vs_adam_clean_data(self):
-        """Verify CASMO converges similarly to Adam on clean data."""
-        dataset = create_synthetic_dataset(n_samples=500)
-        dataloader_casmo = DataLoader(dataset, batch_size=32, shuffle=False)
-        dataloader_adam = DataLoader(dataset, batch_size=32, shuffle=False)
-        
-        # CASMO model
+        optimizer = CASMO(model.parameters(), lr=3e-3)
+        assert train(model, optimizer, loader) < 0.5
+
+    def test_converges_with_weight_decay(self):
+        loader = DataLoader(make_dataset(), batch_size=32, shuffle=True)
         torch.manual_seed(42)
-        model_casmo = SimpleMLP()
-        optimizer_casmo = CASMO(model_casmo.parameters(), lr=1e-3, tau_init_steps=50)
-        loss_casmo = train_model(model_casmo, optimizer_casmo, dataloader_casmo, epochs=20)
-        
-        # Adam model
-        torch.manual_seed(42)
-        model_adam = SimpleMLP()
-        optimizer_adam = torch.optim.Adam(model_adam.parameters(), lr=1e-3)
-        loss_adam = train_model(model_adam, optimizer_adam, dataloader_adam, epochs=20)
-        
-        # Both should achieve similar low loss on clean data
-        assert abs(loss_casmo - loss_adam) < 0.2, \
-            f"CASMO and Adam should have similar final loss. CASMO: {loss_casmo}, Adam: {loss_adam}"
-    
-    def test_casmo_handles_noisy_data(self):
-        """Test that CASMO handles noisy labels better than Adam."""
-        dataset = create_synthetic_dataset(n_samples=500, noise_level=0.3)
-        
-        # CASMO model
-        torch.manual_seed(42)
-        dataloader_casmo = DataLoader(dataset, batch_size=32, shuffle=False)
-        model_casmo = SimpleMLP()
-        optimizer_casmo = CASMO(model_casmo.parameters(), lr=1e-3, tau_init_steps=50)
-        
-        # Train and measure overfitting
-        model_casmo.train()
-        criterion = nn.CrossEntropyLoss()
-        
-        for epoch in range(20):
-            for X, y in dataloader_casmo:
-                optimizer_casmo.zero_grad()
-                outputs = model_casmo(X)
-                loss = criterion(outputs, y)
-                loss.backward()
-                optimizer_casmo.step()
-        
-        # Verify CASMO doesn't perfectly fit noisy data
-        with torch.no_grad():
-            model_casmo.eval()
-            correct = 0
-            total = 0
-            for X, y in dataloader_casmo:
-                outputs = model_casmo(X)
-                _, predicted = torch.max(outputs, 1)
-                total += y.size(0)
-                correct += (predicted == y).sum().item()
-        
-        accuracy = correct / total
-        
-        # With 30% label noise, perfect memorization would give ~100% accuracy
-        # CASMO should resist memorizing and stay below perfect accuracy
-        assert accuracy < 0.95, \
-            f"CASMO should not perfectly memorize noisy data. Accuracy: {accuracy}"
-    
-    def test_convergence_with_weight_decay(self):
-        """Test convergence with weight decay enabled."""
-        dataset = create_synthetic_dataset(n_samples=500)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
         model = SimpleMLP()
-        optimizer = CASMO(model.parameters(), lr=1e-3, weight_decay=0.01)
-        
-        final_loss = train_model(model, optimizer, dataloader, epochs=20)
-        
-        assert final_loss < 0.6, f"Expected convergence with weight decay, got loss {final_loss}"
-    
-    def test_different_granularities(self):
-        """Test both parameter and group granularity modes."""
-        dataset = create_synthetic_dataset(n_samples=300)
-        
-        for granularity in ['parameter', 'group']:
-            dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
-            torch.manual_seed(42)
-            model = SimpleMLP()
-            optimizer = CASMO(
-                model.parameters(), 
-                lr=1e-3, 
-                granularity=granularity,
-                tau_init_steps=50
-            )
-            
-            final_loss = train_model(model, optimizer, dataloader, epochs=15)
-            
-            assert final_loss < 0.7, \
-                f"Granularity '{granularity}' should converge, got loss {final_loss}"
-    
+        optimizer = CASMO(model.parameters(), lr=3e-3, weight_decay=0.01)
+        assert train(model, optimizer, loader) < 0.6
+
+    def test_comparable_to_adam_on_clean_data(self):
+        dataset = make_dataset()
+
+        torch.manual_seed(42)
+        model_c = SimpleMLP()
+        loss_c = train(
+            model_c,
+            CASMO(model_c.parameters(), lr=3e-3),
+            DataLoader(dataset, batch_size=32, shuffle=False),
+        )
+
+        torch.manual_seed(42)
+        model_a = SimpleMLP()
+        loss_a = train(
+            model_a,
+            torch.optim.Adam(model_a.parameters(), lr=3e-3),
+            DataLoader(dataset, batch_size=32, shuffle=False),
+        )
+
+        assert abs(loss_c - loss_a) < 0.2, f"CASMO {loss_c:.3f} vs Adam {loss_a:.3f}"
+
     def test_multiple_parameter_groups(self):
-        """Test with different learning rates for different layers."""
-        dataset = create_synthetic_dataset(n_samples=300)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
+        loader = DataLoader(make_dataset(300), batch_size=32, shuffle=True)
+        torch.manual_seed(42)
         model = SimpleMLP()
-        
-        # Different LR for each layer
-        param_groups = [
-            {'params': model.fc1.parameters(), 'lr': 1e-3},
-            {'params': model.fc2.parameters(), 'lr': 5e-4}
-        ]
-        
-        optimizer = CASMO(param_groups, tau_init_steps=50)
-        final_loss = train_model(model, optimizer, dataloader, epochs=15)
-        
-        assert final_loss < 0.7, f"Multi-group optimization should work, got loss {final_loss}"
-    
-    def test_checkpoint_and_resume(self):
-        """Test saving and loading optimizer state."""
-        dataset = create_synthetic_dataset(n_samples=300)
-        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-        
-        # Train for a few epochs
+        optimizer = CASMO(
+            [
+                {"params": model.fc1.parameters(), "lr": 3e-3},
+                {"params": model.fc2.parameters(), "lr": 1e-3},
+            ]
+        )
+        assert train(model, optimizer, loader, epochs=15) < 0.7
+
+    def test_per_group_robustness(self):
+        """Different robustness per group must train without error."""
+        loader = DataLoader(make_dataset(300), batch_size=32, shuffle=True)
+        torch.manual_seed(42)
         model = SimpleMLP()
-        optimizer = CASMO(model.parameters(), lr=1e-3, tau_init_steps=50)
-        train_model(model, optimizer, dataloader, epochs=5)
-        
-        # Save state
-        checkpoint = {
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict()
-        }
-        
-        # Create new model and optimizer
-        model2 = SimpleMLP()
-        optimizer2 = CASMO(model2.parameters(), lr=1e-3, tau_init_steps=50)
-        
-        # Load state
-        model2.load_state_dict(checkpoint['model'])
-        optimizer2.load_state_dict(checkpoint['optimizer'])
-        
-        # Continue training
-        final_loss = train_model(model2, optimizer2, dataloader, epochs=10)
-        
-        assert final_loss < 0.7, "Resumed training should converge"
-    
+        optimizer = CASMO(
+            [
+                {"params": model.fc1.parameters(), "robustness": 1.0},
+                {"params": model.fc2.parameters(), "robustness": 0.0},
+            ],
+            lr=3e-3,
+        )
+        train(model, optimizer, loader, epochs=10)
+        assert optimizer.group_metrics(0)["confidence"] is not None
+        assert optimizer.group_metrics(1)["confidence"] is not None
+
     def test_gradient_accumulation(self):
-        """Test with gradient accumulation."""
-        dataset = create_synthetic_dataset(n_samples=300)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-        
+        loader = DataLoader(make_dataset(300), batch_size=16, shuffle=True)
+        torch.manual_seed(42)
         model = SimpleMLP()
-        optimizer = CASMO(model.parameters(), lr=1e-3, tau_init_steps=50)
+        optimizer = CASMO(model.parameters(), lr=3e-3)
         criterion = nn.CrossEntropyLoss()
-        
-        accumulation_steps = 2
-        model.train()
-        
-        for epoch in range(10):
-            for i, (X, y) in enumerate(dataloader):
-                outputs = model(X)
-                loss = criterion(outputs, y)
-                loss = loss / accumulation_steps
-                loss.backward()
-                
-                if (i + 1) % accumulation_steps == 0:
+        accumulation = 2
+
+        for _ in range(10):
+            for i, (x, y) in enumerate(loader):
+                (criterion(model(x), y) / accumulation).backward()
+                if (i + 1) % accumulation == 0:
                     optimizer.step()
                     optimizer.zero_grad()
-        
-        # Just verify no errors occur
-        assert True
+
+        assert all(torch.isfinite(p).all() for p in model.parameters())
+
+    def test_checkpoint_and_resume(self):
+        loader = DataLoader(make_dataset(300), batch_size=32, shuffle=True)
+        torch.manual_seed(42)
+        model = SimpleMLP()
+        optimizer = CASMO(model.parameters(), lr=3e-3)
+        train(model, optimizer, loader, epochs=5)
+
+        checkpoint = {"model": model.state_dict(), "optimizer": optimizer.state_dict()}
+
+        model2 = SimpleMLP()
+        optimizer2 = CASMO(model2.parameters(), lr=3e-3)
+        model2.load_state_dict(checkpoint["model"])
+        optimizer2.load_state_dict(checkpoint["optimizer"])
+
+        assert train(model2, optimizer2, loader, epochs=10) < 0.7
+
+    def test_works_with_lr_scheduler_end_to_end(self):
+        loader = DataLoader(make_dataset(300), batch_size=32, shuffle=True)
+        torch.manual_seed(42)
+        model = SimpleMLP()
+        optimizer = CASMO(model.parameters(), lr=1e-2)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        criterion = nn.CrossEntropyLoss()
+
+        for _ in range(10):
+            for x, y in loader:
+                optimizer.zero_grad()
+                criterion(model(x), y).backward()
+                optimizer.step()
+            scheduler.step()
+
+        assert optimizer.param_groups[0]["lr"] < 1e-2
+        assert all(torch.isfinite(p).all() for p in model.parameters())
