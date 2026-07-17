@@ -65,7 +65,11 @@ class FinancialPortfolioDataset(Dataset):
         self.seq_len = seq_len
         self.split = split
 
-        # 1. Download or Generate Data
+        # 1. Download or Generate Data.
+        # self.source records which was actually used. The train and test splits are built
+        # by separate constructor calls, so without this a failed download on only one of
+        # them would silently train on real data and backtest on synthetic.
+        self.source = "synthetic"
         if HAS_YFINANCE:
             try:
                 print(f"[{split.upper()}] Downloading data for: {', '.join(tickers)}")
@@ -94,6 +98,7 @@ class FinancialPortfolioDataset(Dataset):
 
                 prices = prices[available_tickers]
                 prices = prices.dropna()
+                self.source = "real"
 
             except Exception as e:
                 print(f"⚠️  yfinance failed ({e}). Switching to SYNTHETIC mode.")
@@ -257,17 +262,21 @@ def run_benchmark(optimizer_name, device, train_loader, test_loader, num_assets,
 
     model = PortfolioAllocator(num_assets).to(device)
 
-    # CASMO Configuration
+    # Both arms must differ ONLY in the optimizer. weight_decay is stated explicitly for
+    # both: torch.optim.AdamW defaults to 1e-2, so omitting it previously decayed the
+    # baseline while CASMO ran at 0.0 -- which would confound a turnover/Sharpe claim.
+    WEIGHT_DECAY = 0.0  # no L2: we want pure Sharpe optimization
+
     if optimizer_name == "CASMO":
         optimizer = CASMO(
             model.parameters(),
             lr=1e-3,
-            weight_decay=0.0,  # No L2, we want pure Sharpe optimization
+            weight_decay=WEIGHT_DECAY,
             robustness=1.0,  # financial returns are noise dominated
             c_min=0.1,
         )
     else:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
 
     # --- Training Phase ---
     model.train()
@@ -397,6 +406,18 @@ def main():
     # 1. Setup Data
     train_ds = FinancialPortfolioDataset(split="train")
     test_ds = FinancialPortfolioDataset(split="test")
+
+    # The two splits download independently, so a partial failure could pair a real-data
+    # train set with a synthetic backtest. Refuse to report a number from that.
+    if train_ds.source != test_ds.source:
+        raise RuntimeError(
+            f"Train and test came from different data sources "
+            f"(train={train_ds.source}, test={test_ds.source}). Results would be meaningless. "
+            "Re-run when yfinance is reachable, or force synthetic for both."
+        )
+    print(f"\n>>> DATA SOURCE: {train_ds.source.upper()} <<<")
+    if train_ds.source == "synthetic":
+        print(">>> These are simulated returns, NOT a market backtest. Do not report as one.\n")
 
     train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
     test_loader = DataLoader(test_ds, batch_size=1, shuffle=False)  # Seq size 1 for backtest

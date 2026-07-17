@@ -191,17 +191,23 @@ def run_benchmark(
 
     criterion = nn.CrossEntropyLoss()
 
+    # Both arms must differ ONLY in the optimizer. betas is held at the grokking
+    # convention (0.9, 0.98) for both -- previously CASMO silently used its (0.9, 0.999)
+    # default against AdamW's 0.98, which confounded the comparison.
+    betas = (0.9, 0.98)
+
     if optimizer_name == "casmo":
         optimizer = CASMO(
             model.parameters(),
             lr=lr,
             weight_decay=weight_decay,
+            betas=betas,
             robustness=1.0,  # heavy label noise: maximise noise suppression
             c_min=0.1,
         )
     else:
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.98)
+            model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas
         )
 
     results = {
@@ -291,38 +297,89 @@ def main():
     parser = argparse.ArgumentParser(description="Noisy Grokking Benchmark")
     parser.add_argument("--epochs", type=int, default=2000, help="Number of epochs")
     parser.add_argument("--noise", type=float, default=0.3, help="Label noise rate (0.0-1.0)")
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[0, 1, 2],
+        help="Seeds to run. Each seed reseeds the split, the label noise AND the model init, "
+        "so the spread reflects the whole pipeline. Grokking is high variance -- a single "
+        "seed is not a result.",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
     print(f"CASMO vs AdamW Benchmark - Noisy Grokking (Noise: {args.noise*100:.0f}%)")
     print("Task: (a + b) mod 97")
+    print(f"Seeds: {args.seeds}")
     print("=" * 70)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    # Setup Data
     P = 97
-    train_dataset = NoisyModularDataset(
-        p=P, split="train", train_fraction=0.5, noise_rate=args.noise
-    )
-    test_dataset = NoisyModularDataset(p=P, split="test", train_fraction=0.5)
-
-    train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
-
-    # Run Benchmarks
     EPOCHS = args.epochs
+    final = {"casmo": [], "adamw": []}
+    casmo_results = adamw_results = None
 
-    print("\nStarting CASMO run...")
-    casmo_results = run_benchmark(
-        "casmo", device, train_loader, test_loader, num_epochs=EPOCHS, lr=1e-3, weight_decay=1.0
-    )
+    for seed in args.seeds:
+        print(f"\n{'#'*70}\n# SEED {seed}\n{'#'*70}")
 
-    print("\nStarting AdamW run...")
-    adamw_results = run_benchmark(
-        "adamw", device, train_loader, test_loader, num_epochs=EPOCHS, lr=1e-3, weight_decay=1.0
-    )
+        # Reseed the data too: a new split and a new noise draw per seed.
+        train_dataset = NoisyModularDataset(
+            p=P, split="train", train_fraction=0.5, noise_rate=args.noise, seed=seed
+        )
+        test_dataset = NoisyModularDataset(p=P, split="test", train_fraction=0.5, seed=seed)
+
+        train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
+
+        # Both arms get the identical split, noise draw and init: a paired comparison.
+        c_res = run_benchmark(
+            "casmo",
+            device,
+            train_loader,
+            test_loader,
+            num_epochs=EPOCHS,
+            lr=1e-3,
+            weight_decay=1.0,
+            seed=seed,
+        )
+        a_res = run_benchmark(
+            "adamw",
+            device,
+            train_loader,
+            test_loader,
+            num_epochs=EPOCHS,
+            lr=1e-3,
+            weight_decay=1.0,
+            seed=seed,
+        )
+        final["casmo"].append(c_res["val_accs"][-1])
+        final["adamw"].append(a_res["val_accs"][-1])
+
+        if casmo_results is None:  # keep the first seed's curves for the plot
+            casmo_results, adamw_results = c_res, a_res
+
+    def _stats(xs):
+        mean = sum(xs) / len(xs)
+        var = sum((x - mean) ** 2 for x in xs) / len(xs)
+        return mean, var**0.5
+
+    print("\n" + "=" * 70)
+    print(f"FINAL VALIDATION ACCURACY over {len(args.seeds)} seed(s) — mean ± std")
+    print("=" * 70)
+    for name in ("casmo", "adamw"):
+        m, sd = _stats(final[name])
+        print(
+            f"  {name.upper():6s} {m:6.2f} ± {sd:5.2f}   per-seed: "
+            f"{[round(v, 2) for v in final[name]]}"
+        )
+    dm = _stats(final["casmo"])[0] - _stats(final["adamw"])[0]
+    print(f"\n  delta (CASMO - AdamW): {dm:+.2f} points")
+    if len(args.seeds) < 3:
+        print("  WARNING: fewer than 3 seeds. Grokking is high variance; treat as anecdote.")
+    print("=" * 70)
 
     # Plotting
     print("\nPlotting results...")
