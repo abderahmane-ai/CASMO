@@ -24,9 +24,15 @@ CASMO tracks two EMAs per coordinate — the same optimizer-state footprint as A
 
 $$m_t = \beta_1 m_{t-1} + (1 - \beta_1)\, g_t \;\approx\; \mathbb{E}[g]$$
 
-$$s_t = \beta_2 s_{t-1} + (1 - \beta_2)\,(g_t - m_t)^2 \;\approx\; \mathrm{Var}[g]$$
+$$s_t = \beta_2 s_{t-1} + (1 - \beta_2)\,(g_t - m_{t-1})^2 \;\approx\; \mathrm{Var}[g]$$
 
-$s_t$ is a **centered** (belief-style) variance. This matters: the earlier design estimated noise as $v_t - m_t^2$ using Adam's uncentered second moment, which mixes two different EMA horizons ($1/(1-\beta_1) \approx 10$ steps vs. $1/(1-\beta_2) \approx 1000$ steps) and is therefore a biased SNR estimate. Measuring the deviation $(g_t - m_t)^2$ directly avoids that timescale mismatch.
+$s_t$ is a **centered** variance. This matters: the earlier design estimated noise as $v_t - m_t^2$ using Adam's uncentered second moment, which mixes two different EMA horizons ($1/(1-\beta_1) \approx 10$ steps vs. $1/(1-\beta_2) \approx 1000$ steps) and is therefore a biased SNR estimate. Measuring the deviation directly avoids that timescale mismatch.
+
+**The deviation is measured against $m_{t-1}$, not $m_t$** — the mean *before* it absorbs $g_t$. This is not cosmetic. Since $m_t = \beta_1 m_{t-1} + (1-\beta_1) g_t$,
+
+$$g_t - m_t = \beta_1\,(g_t - m_{t-1})$$
+
+so centering on the updated mean would estimate $\beta_1^2\,\mathrm{Var}[g]$ — a 19% underestimate at $\beta_1 = 0.9$, and worse as $\beta_1$ falls (75% at $\beta_1 = 0.5$). Because the shrinkage factor *is* $\beta_1^2$, that bias would silently couple `robustness` to `betas`: measured at 30% label noise with $\rho = 1$ held fixed, the biased form swung 0.792 → 0.707 as $\beta_1$ went 0.9 → 0.5 (a spread of 0.085), while the corrected form held at 0.808 → 0.794 (spread 0.016). A momentum knob should not quietly change how noise-robust the optimizer is.
 
 Bias correction is applied at use time: $\hat{m}_t = m_t/(1-\beta_1^t)$, $\hat{s}_t = s_t/(1-\beta_2^t)$.
 
@@ -117,11 +123,11 @@ an earlier per-step `.item()` from this path measured 1.19× faster on a 40-laye
 
 Memorization gradients depend on individual mislabeled samples, so they are inconsistent across batches: $\mathrm{Var}[g]$ is high and AGAR is low. Generalizing gradients align across many samples, so AGAR is high. Trust therefore shrinks precisely when the model starts fitting noise.
 
-Measured at 30% label noise (5 seeds): CASMO ($\rho=1$) reaches **0.797** test accuracy versus AdamW's **0.679**, while refusing to memorize the training set (0.850 train accuracy vs. AdamW's 1.000). At 15% noise: **0.851** vs. **0.763**.
+Measured at 30% label noise (5 seeds): CASMO ($\rho=1$) reaches **0.810** test accuracy versus AdamW's **0.679**, while refusing to memorize the training set (0.835 train accuracy vs. AdamW's 1.000). At 15% noise: **0.857** vs. **0.763**.
 
 ### 4.2 Stability at Aggressive Learning Rates (validated)
 
-Because focus never amplifies and trust contracts when the signal degrades, CASMO tolerates larger steps. At $\eta = 3\times10^{-2}$ CASMO ($\rho=0.5$) reaches the loss threshold in **36 steps** versus Adam's **70**, with better final accuracy (0.932 vs. 0.921). Where a larger stable learning rate is available, confidence gating is a *speed* win, not a tax.
+Because focus never amplifies and trust contracts when the signal degrades, CASMO tolerates larger steps. At $\eta = 3\times10^{-2}$ CASMO ($\rho=0.5$) reaches the loss threshold in **38 steps** versus Adam's **70**, with better final accuracy (0.932 vs. 0.921). Where a larger stable learning rate is available, confidence gating is a *speed* win, not a tax.
 
 ### 4.3 Long-Tail Learning
 
@@ -129,7 +135,7 @@ Rare classes contribute few samples per batch, so their gradients are high-varia
 
 ### 4.4 Honest Limitation: Isotropic Gradient Noise
 
-When noise is injected uniformly into *every* coordinate (as in DP-SGD), the absolute axis is counter-productive: it slows training exactly when the fixed step budget can least afford it. Measured at $\sigma = 0.5$: Adam 0.641 test accuracy, CASMO $\rho=0$ 0.623, CASMO $\rho=1$ **0.396**.
+When noise is injected uniformly into *every* coordinate (as in DP-SGD), the absolute axis is counter-productive: it slows training exactly when the fixed step budget can least afford it. Measured at $\sigma = 0.5$: Adam 0.641 test accuracy, CASMO $\rho=0$ 0.623, CASMO $\rho=1$ **0.383**.
 
 Label noise and isotropic gradient noise genuinely want opposite policies — the former rewards slowing down, the latter punishes it. This is why `robustness` is exposed rather than hard-coded. **For DP-SGD-style workloads, use a low `robustness`** (0 – 0.5); for label noise, use a high one.
 

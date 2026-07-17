@@ -29,9 +29,9 @@ accumulation — works unchanged.
 - **Clean data:** the same test accuracy as AdamW (measured 0.934 vs. 0.931). Training
   loss falls more slowly at higher `robustness`; that is the anti-memorization mechanism
   working, not a failure to converge.
-- **Noisy labels:** materially better generalization (measured +11.8 points at 30% label
+- **Noisy labels:** materially better generalization (measured +13.5 points at 30% label
   noise with `robustness=1.0`).
-- **Aggressive LR:** CASMO is often *faster* than Adam (36 vs. 70 steps at `lr=3e-2`)
+- **Aggressive LR:** CASMO is often *faster* than Adam (38 vs. 70 steps at `lr=3e-2`)
   because confidence gating absorbs the instability a large step would otherwise cause.
 - **Cost:** ~2× Adam's per-step wall-clock (elementwise variance tracking), at Adam's
   memory footprint.
@@ -85,7 +85,7 @@ optimizer = CASMO(model.parameters(), lr=1e-3, robustness=1.0)
 
 1. **Noise robustness actually works now.** v0.3 measured 0.680 test accuracy at 30% label
    noise versus AdamW's 0.679 — essentially no benefit, because it calibrated its
-   threshold against an already-noisy baseline. v0.4 at `robustness=1.0` measures 0.797.
+   threshold against an already-noisy baseline. v0.4 at `robustness=1.0` measures 0.810.
 2. **No 500-step calibration ramp.** v0.3 spent its first `tau_init_steps` at a reduced
    effective LR (mean confidence ≈ 0.70). v0.4 has no warm-up phase.
 3. **NaN/Inf gradients no longer raise by default.** v0.3 scanned every gradient every

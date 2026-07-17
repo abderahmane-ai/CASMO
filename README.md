@@ -99,16 +99,16 @@ mean ± stdev, clean test labels. Reproduce with `python research/validate_redes
 
 | Regime | Adam | CASMO (`robustness=1.0`) |
 |---|---|---|
-| **30% label noise** (test acc) | 0.675 ± 0.020 | **0.797 ± 0.008** |
-| **15% label noise** (test acc) | 0.764 ± 0.022 | **0.851 ± 0.014** |
+| **30% label noise** (test acc) | 0.675 ± 0.020 | **0.810 ± 0.008** |
+| **15% label noise** (test acc) | 0.764 ± 0.022 | **0.857 ± 0.016** |
 | **Clean data** (test acc) | 0.931 ± 0.010 | 0.934 ± 0.007 |
-| **High LR** (steps to converge) | 70 | **36** (`robustness=0.5`) |
+| **High LR** (steps to converge) | 70 | **38** (`robustness=0.5`) |
 
-CASMO reaches **+11.8 points** of test accuracy over Adam at 30% label noise, and refuses
-to memorize the corrupted training set (0.850 train accuracy vs. Adam's 1.000).
+CASMO reaches **+13.5 points** of test accuracy over Adam at 30% label noise, and refuses
+to memorize the corrupted training set (0.835 train accuracy vs. Adam's 1.000).
 
 **Honest limitation:** under *isotropic gradient noise* (DP-SGD-style), high `robustness`
-hurts — Adam 0.641 vs. CASMO(ρ=1) 0.396. Label noise and injected gradient noise want
+hurts — Adam 0.641 vs. CASMO(ρ=1) 0.383. Label noise and injected gradient noise want
 opposite policies. Use low `robustness` for DP-SGD. See
 [REDESIGN.md §6](https://github.com/abderahmane-ai/CASMO/blob/main/research/REDESIGN.md).
 

@@ -90,3 +90,49 @@ class TestConfidence:
         _train_noisy(optimizer, model, seed=4)
         conf = optimizer.group_metrics(0)["confidence"]
         assert abs(conf - 1.0) < 1e-5, f"expected confidence == 1, got {conf}"
+
+
+class TestVarianceEstimator:
+    """The noise EMA must estimate Var[g], not a beta1-scaled version of it."""
+
+    def test_noise_ema_tracks_true_variance(self):
+        """s must converge to Var[g] for a known distribution.
+
+        Measuring the deviation against the *updated* m would give
+        grad - m_t == beta1 * (grad - m_{t-1}), i.e. beta1^2 * Var[g] -- 19% low at
+        beta1=0.9 and far worse as beta1 falls.
+        """
+        torch.manual_seed(0)
+        true_mean, true_std = 1.0, 2.0
+        param = torch.nn.Parameter(torch.zeros(1))
+        optimizer = CASMO([param], lr=0.0)  # measure only
+
+        for _ in range(20000):
+            param.grad = torch.randn(1) * true_std + true_mean
+            optimizer.step()
+
+        state = optimizer.state[param]
+        s_hat = state["s"] / (1 - 0.999 ** state["step"])
+        ratio = s_hat.item() / true_std**2
+        # Upper bound is loose: measuring against m_{t-1} adds Var[m_{t-1}], a few
+        # percent. The lower bound is what matters -- the old ordering scored 0.88.
+        assert 0.9 < ratio < 1.2, f"noise EMA should track Var[g]; ratio to true = {ratio:.3f}"
+
+    def test_robustness_does_not_depend_on_betas(self):
+        """`robustness` must mean the same thing regardless of beta1.
+
+        A beta1-dependent variance bias would silently weaken noise suppression when
+        a user tunes momentum, which has nothing to do with robustness.
+        """
+        readings = []
+        for beta1 in (0.9, 0.7, 0.5):
+            torch.manual_seed(4)
+            model = nn.Linear(10, 2)
+            optimizer = CASMO(model.parameters(), lr=1e-3, betas=(beta1, 0.999), robustness=1.0)
+            _train_noisy(optimizer, model, noise=3.0, seed=4)
+            readings.append(optimizer.group_metrics(0)["agar"])
+
+        spread = max(readings) - min(readings)
+        assert (
+            spread < 0.15
+        ), f"AGAR should not swing with beta1 (bias would make it), got {readings}"

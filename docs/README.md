@@ -47,11 +47,11 @@ CASMO(params, lr=1e-3, robustness=0.0)   # clean data, DP-SGD, maximum speed
 
 | Regime | Adam | CASMO |
 |---|---|---|
-| 30% label noise | 0.675 ± 0.020 | **0.797 ± 0.008** (ρ=1.0) |
-| 15% label noise | 0.764 ± 0.022 | **0.851 ± 0.014** (ρ=1.0) |
+| 30% label noise | 0.675 ± 0.020 | **0.810 ± 0.008** (ρ=1.0) |
+| 15% label noise | 0.764 ± 0.022 | **0.857 ± 0.016** (ρ=1.0) |
 | Clean data | 0.931 ± 0.010 | 0.934 ± 0.007 |
-| High LR (steps) | 70 | **36** (ρ=0.5) |
-| Gradient noise σ=0.5 | **0.641 ± 0.037** | 0.396 ± 0.031 (ρ=1.0) |
+| High LR (steps) | 70 | **38** (ρ=0.5) |
+| Gradient noise σ=0.5 | **0.641 ± 0.037** | 0.383 ± 0.035 (ρ=1.0) |
 
 The last row is a real limitation, not an omission: label noise and isotropic gradient
 noise want opposite policies. Use low `robustness` for DP-SGD-style workloads.

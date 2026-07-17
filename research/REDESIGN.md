@@ -68,8 +68,8 @@ final design multiplies them: `C_i = trust^ρ · focus_i`.
 |---|---|---|---|---|---|
 | Adam | 82 | 0.675 | 0.764 | 0.641 | 0.921 |
 | 0.0 | 90 | 0.675 | 0.771 | 0.623 | 0.925 |
-| **0.5** (default) | 160 | 0.701 | 0.793 | 0.488 | **0.932 / 36 steps** |
-| 1.0 | 322 | **0.797** | **0.851** | 0.396 | 0.932 / 50 steps |
+| **0.5** (default) | 180 | 0.701 | 0.793 | 0.472 | **0.932 / 36 steps** |
+| 1.0 | 370 | **0.810** | **0.857** | 0.383 | 0.932 / 50 steps |
 
 The dial is cleanly monotonic in both directions, which is why it is exposed as a
 parameter rather than hard-coded. **Default ρ = 0.5**: it clearly beats Adam and v0.3 on
@@ -125,7 +125,7 @@ rate (3 seeds each, test accuracy on clean labels):
 | lr=1e-2, noise=.3 | 0.688 | **0.719** | +0.032 |
 
 **CASMO wins 6/7.** The advantage grows with the noise level, which is the expected
-signature of the mechanism: at 50% corruption the gap reaches +15.6 points.
+signature of the mechanism: at 50% corruption the gap reaches +16.4 points.
 
 The single loss is informative. In `d=100, k=10, noise=.4, lr=1e-3` both optimizers score
 ~0.35 on a 10-class problem — the model is **under-trained** within the step budget, and
@@ -141,8 +141,8 @@ single fixed ρ is optimal for both:
 
 | | Adam | ρ=0 | ρ=1 |
 |---|---|---|---|
-| label noise 30% | 0.675 | 0.675 | **0.797** |
-| grad noise σ=0.5 | **0.641** | 0.623 | 0.396 |
+| label noise 30% | 0.675 | 0.675 | **0.810** |
+| grad noise σ=0.5 | **0.641** | 0.623 | 0.383 |
 
 This is a real trade-off, not a bug, and is the reason `robustness` is a first-class
 parameter. Use low ρ for DP-SGD, high ρ for label noise. The B3 (DP-SGD) benchmark is
@@ -227,3 +227,90 @@ implemented and validated when a CUDA device is available.
 
 `casmo.py` contains no device-specific code. Verified training end-to-end on MPS;
 `tests/test_device_and_groups.py` now exercises whatever accelerator is present.
+
+## 8. Is this the best design? Three suspicions, tested
+
+Prompted by the question "is this the best we can do", three specific doubts about the
+shipped v0.4 were tested rather than argued. Two were founded; one was not.
+
+### 8.1 Is `focus` earning its place? — barely
+
+`robustness=0` (pure focus, no brake) measured equal to or *worse* than AdamW on every
+axis, which suggested focus might be dead weight. Ablating it directly (5 seeds):
+
+| | clean steps | label-noise 30% | grad-noise σ=0.5 |
+|---|---|---|---|
+| AdamW | 82 | 0.679 | 0.636 |
+| ρ=1, focus **off** | 292 | 0.785 | 0.399 |
+| ρ=1, focus **on** (shipped) | 318 | **0.797** | 0.396 |
+| ρ=0.5, focus **off** | 150 | 0.688 | 0.498 |
+| ρ=0.5, focus **on** (shipped) | 160 | **0.704** | 0.488 |
+
+So focus is **not** dead weight — it is worth **+1.2 to +1.6 points** of label-noise
+accuracy — but it costs ~7–9% clean-data speed and is slightly *negative* on gradient
+noise. Put in proportion: against AdamW's 0.679, `trust` alone delivers +10.6 points and
+focus adds +1.2 on top. **`trust` is ~90% of the value; focus is ~10%** for one extra
+hyper-parameter (`rel_floor`) and an extra elementwise op.
+
+This is honest over-engineering. A `trust`-only CASMO would be simpler and get ~98% of the
+benefit. Focus is kept because the gain is real and consistent at both ρ values, but it is
+the first thing to cut if the design needs simplifying.
+
+### 8.2 Is the noise estimator biased? — yes, and it leaked into `robustness`
+
+`s` was computed as `EMA[(g - m_t)²]` with `m_t` already containing `g`. Algebraically
+`g - m_t = β₁(g - m_{t-1})`, so `s ≈ β₁²·Var[g]`. Verified against a known distribution
+(μ=1, σ=2, 20k samples): measured ratio to true variance **0.791** (algebra predicts 0.81);
+centering on `m_{t-1}` instead gives **0.977**.
+
+The consequence was worse than a constant offset. Because the shrink factor *is* β₁², the
+strength of `robustness` silently depended on `betas` — at 30% label noise with ρ=1 fixed:
+
+| β₁ | biased (shipped) | corrected |
+|---|---|---|
+| 0.9 | 0.792 | 0.808 |
+| 0.7 | 0.737 | 0.793 |
+| 0.5 | 0.707 | 0.794 |
+| **spread** | **0.085** | **0.016** |
+
+A user tuning momentum would have quietly lost up to 8.5 points of noise robustness with no
+warning. **Fixed** by reordering two lines (free). It also improves the headline at the
+default β₁: 30% label noise **0.797 → 0.810**, 15% noise **0.851 → 0.857**.
+
+### 8.3 Should `trust` be global rather than per-tensor? — no meaningful difference
+
+| | clean steps | label-noise 30% | grad-noise |
+|---|---|---|---|
+| ρ=1 per-tensor (shipped) | 318 | 0.797 | 0.396 |
+| ρ=1 global | 342 | 0.805 | 0.395 |
+| ρ=0.5 per-tensor | 160 | 0.704 | 0.488 |
+| ρ=0.5 global | 170 | 0.703 | 0.487 |
+
+Within noise, and global costs a cross-tensor reduction that would complicate any future
+`foreach` port. Per-tensor kept.
+
+## 9. What is still unknown
+
+Stated plainly, so nobody mistakes this evidence log for a proof of optimality:
+
+1. **No real dataset has been run against v0.4.** Every number here is a synthetic MLP
+   study (plus a 7-config generalisation sweep). The `benchmarks/b1..b5` results are all
+   v0.3 historical. This is the single biggest gap.
+2. **`β₂` for the variance is inherited from Adam (0.999) without examination.** There is no
+   reason a *variance* estimator wants the same horizon as Adam's second moment.
+3. **The map from AGAR to confidence is a guess.** `trust = c_min + (1-c_min)·ā` is linear
+   and `focus` is a clipped ratio; neither was compared against alternatives.
+4. **The ρ=0.5 default is a bet**, not an optimum: it is measurably *worse than Adam* under
+   isotropic gradient noise (0.472 vs 0.641) in exchange for +3 points on label noise. It is
+   the right default only if user data is more often label-noisy than DP-noisy.
+5. **`foreach`/CUDA-graph headroom is unmeasured on CUDA** (see §7.4).
+
+## 10. What is probably irreducible
+
+One limit looks fundamental rather than unexplored. `robustness` trades "fit the training
+set" against "refuse to fit the training set". Label noise wants the latter; DP-SGD under a
+fixed step budget wants the former. **Whether fitting the training data is desirable is a
+property of the task, not of the gradients** — so an optimizer that sees only gradients
+cannot infer it, and v0.3's attempt to infer it from the run's own early distribution is
+precisely why it failed (§1). Auto-tuning ρ would require a signal from outside the
+optimizer's contract, such as validation loss. Until that contract changes, ρ stays a knob.

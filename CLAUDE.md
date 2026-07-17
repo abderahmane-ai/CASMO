@@ -66,10 +66,16 @@ Invariants that must not be broken:
    one makes AGAR depend on the *absolute gradient scale* instead of the ratio it is defined
    as: with `+eps`, a fixed SNR of 100 reads 0.897 at gradient scale 1 but 0.470 at scale
    1e-4. `test_agar_is_invariant_to_gradient_scale` guards this.
-6. **State stays standard.** Per-param state is `{step, m, s}`, so the parent
+6. **Center the deviation on `m_{t-1}`, not `m_t`.** Compute `diff = grad - m` BEFORE
+   updating `m`. Reordering these two lines looks harmless and is not: `g - m_t ==
+   beta1*(g - m_{t-1})`, so centering on the updated mean estimates `beta1^2 * Var[g]`
+   (19% low at beta1=0.9, 75% low at beta1=0.5) and silently makes `robustness` depend on
+   `betas`. `test_noise_ema_tracks_true_variance` and
+   `test_robustness_does_not_depend_on_betas` guard this.
+7. **State stays standard.** Per-param state is `{step, m, s}`, so the parent
    `torch.optim.Optimizer` handles `state_dict`/`load_state_dict`. Do not add custom
    serialization — v0.3 did and it was a bug source.
-7. `robustness=0, rel_floor=1` must reduce **exactly** to AdamW.
+8. `robustness=0, rel_floor=1` must reduce **exactly** to AdamW.
 
 ## Validate before you claim
 
@@ -94,10 +100,10 @@ Current reference numbers (5 seeds, test accuracy unless noted):
 | Regime | Adam | CASMO ρ=0.5 | CASMO ρ=1.0 |
 |---|---|---|---|
 | clean | 0.931 | 0.934 | 0.934 |
-| label noise 30% | 0.675 | 0.701 | **0.797** |
-| label noise 15% | 0.764 | 0.793 | **0.851** |
-| grad noise σ=0.5 | **0.641** | 0.488 | 0.396 |
-| high LR (steps) | 70 | **36** | 50 |
+| label noise 30% | 0.675 | 0.701 | **0.810** |
+| label noise 15% | 0.764 | 0.793 | **0.857** |
+| grad noise σ=0.5 | **0.641** | 0.472 | 0.383 |
+| high LR (steps) | 70 | **38** | 50 |
 
 ## Known trade-off (do not "fix" this)
 
@@ -107,7 +113,7 @@ This is why `robustness` is exposed rather than auto-tuned. If someone reports "
 worse under DP-SGD", the answer is `robustness=0.0–0.5`, not a code change.
 
 Generalisation was checked across depth/width/dimension/noise (7 configs, 3 seeds):
-**CASMO ρ=1 beats AdamW in 6/7**, and the margin grows with noise (+15.6 points at 50%
+**CASMO ρ=1 beats AdamW in 6/7**, and the margin grows with noise (+16.4 points at 50%
 label corruption). The one loss is a config where both optimizers are near chance —
 i.e. **under-fitting**. Rule of thumb: high ρ pays when the model *would otherwise
 memorise noise*; it costs when the model has not yet fit the signal (short step budget,

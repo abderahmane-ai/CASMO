@@ -193,9 +193,13 @@ class CASMO(torch.optim.Optimizer):
                 state["step"] += 1
                 step = state["step"]
 
-                # First moment (signal) and belief variance (noise).
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
+                # Noise is measured as the deviation from the PREVIOUS mean, before m
+                # absorbs this gradient. Measuring against the updated m instead would
+                # give grad - m_t == beta1 * (grad - m_{t-1}), i.e. an estimate of
+                # beta1^2 * Var[g] -- a 19% underestimate at beta1=0.9 that gets worse
+                # as beta1 falls, which would silently couple `robustness` to `betas`.
                 diff = grad - m
+                m.mul_(beta1).add_(grad, alpha=1 - beta1)
                 s.mul_(beta2).addcmul_(diff, diff, value=1 - beta2)
 
                 bias_correction1 = 1 - beta1**step

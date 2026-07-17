@@ -108,8 +108,8 @@ Measured trade-off (5 seeds, see [`research/REDESIGN.md`](../research/REDESIGN.m
 |---|---|---|---|
 | Adam | 82 | 0.675 | 0.641 |
 | 0.0 | 90 | 0.675 | 0.623 |
-| 0.5 | 160 | 0.701 | 0.488 |
-| 1.0 | 322 | **0.797** | 0.396 |
+| 0.5 | 180 | 0.701 | 0.472 |
+| 1.0 | 370 | **0.810** | 0.383 |
 
 Higher ρ trades raw training-loss speed for resistance to noise. It does **not** cost
 clean-data generalization (test accuracy is flat at 0.931–0.934 across ρ).

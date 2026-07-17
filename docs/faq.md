@@ -24,8 +24,9 @@ The two axes of the confidence map:
   gradients are mostly noise, this shrinks and the whole tensor slows down. This is what
   resists memorizing label noise.
 - **focus** (relative) = `clip(AGAR_i / mean(AGAR), rel_floor, 1)` — per coordinate,
-  mean-normalized. It shifts the step toward reliable coordinates without changing the
-  overall pace. This is what preserves speed and stability.
+  mean-normalized. It shifts the step toward coordinates whose signal fraction beats their
+  tensor's average. Capped at 1, so it only down-weights; that means `mean(focus) <= 1`, so
+  it does cost a little pace. The cap is what keeps CASMO stable at aggressive LRs.
 
 They are combined as `C_i = trust**robustness * focus_i`.
 
@@ -43,14 +44,14 @@ than guessing. See [REDESIGN.md §6](../research/REDESIGN.md).
 ### What learning rate should I use?
 
 The one you already use for AdamW. CASMO tolerates aggressive LRs better than Adam
-(measured 36 vs. 70 steps to converge at `lr=3e-2`), so if instability currently caps your
+(measured 38 vs. 70 steps to converge at `lr=3e-2`), so if instability currently caps your
 LR, try raising it.
 
 ### My training loss decreases more slowly than with Adam. Is it broken?
 
 Almost certainly not — that is the mechanism working. At `robustness=1.0`, CASMO
 deliberately refuses to drive the training loss to zero when the data contains noise. On
-30% label noise it reaches 0.850 train accuracy where AdamW reaches 1.000, and its
+30% label noise it reaches 0.835 train accuracy where AdamW reaches 1.000, and its
 **test** accuracy is 12 points higher as a result.
 
 Judge CASMO on validation metrics, not training loss. If validation is also worse on

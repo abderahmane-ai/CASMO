@@ -16,9 +16,16 @@ rejected alternatives are recorded in [`research/REDESIGN.md`](research/REDESIGN
 - **Per-coordinate confidence.** AGAR is now applied per coordinate instead of being
   averaged into a single scalar per parameter group. The gate reshapes the update
   direction rather than only rescaling its length.
-- **Correct variance estimate.** Noise is now `s = EMA[(g - m)²]` (centered) instead of
-  `v - m²`, which mixed the `beta1` (~10 step) and `beta2` (~1000 step) horizons and was
+- **Correct variance estimate.** Noise is now `s = EMA[(g - m_{t-1})²]` (centered) instead
+  of `v - m²`, which mixed the `beta1` (~10 step) and `beta2` (~1000 step) horizons and was
   therefore a biased SNR estimate.
+- **The deviation is centered on `m_{t-1}`, not `m_t`.** Since `g - m_t == beta1*(g - m_{t-1})`,
+  centering on the updated mean estimates `beta1^2 * Var[g]` — 19% low at `beta1=0.9` and 75%
+  low at `beta1=0.5`. Because the shrinkage factor *is* `beta1^2`, that silently coupled
+  `robustness` to `betas`: at 30% label noise with `robustness=1` fixed, the biased form swung
+  0.792 → 0.707 as `beta1` went 0.9 → 0.5 (spread 0.085); corrected, it holds at 0.808 → 0.794
+  (spread 0.016). Verified against a known distribution: the estimator now tracks `Var[g]` to
+  within a few percent instead of 0.79×.
 - **Absolute scale, no calibration.** AGAR is bounded in `[0, 1]` by construction, so the
   calibration phase, the `tau` threshold, the sigmoid mapping and the freeze are all gone.
   *This fixes the algorithm's central flaw:* calibrating against the early-training AGAR
@@ -80,7 +87,7 @@ rejected alternatives are recorded in [`research/REDESIGN.md`](research/REDESIGN
   the median, §2.4's formula used the mean) and the README expanded AGAR as "Adaptive
   Gradient-Aware Regularization" while the code said "Adaptive Gradient Alignment Ratio".
 - Documented an honest limitation: under isotropic gradient noise (DP-SGD-like), high
-  `robustness` **hurts** (Adam 0.641 vs. CASMO ρ=1 0.396). Label noise and injected
+  `robustness` **hurts** (Adam 0.641 vs. CASMO ρ=1 0.383). Label noise and injected
   gradient noise want opposite policies.
 - Removed false claims from this changelog's history — the 0.2.0 entry asserted
   "`verify_installation.py` passes with no regressions" (it crashed) and cited a
@@ -90,16 +97,16 @@ rejected alternatives are recorded in [`research/REDESIGN.md`](research/REDESIGN
 
 | Regime (5 seeds) | Adam | CASMO v0.3 | CASMO v0.4 |
 |---|---|---|---|
-| 30% label noise (test acc) | 0.675 | 0.680 | **0.797** (ρ=1) |
-| 15% label noise (test acc) | 0.764 | 0.773 | **0.851** (ρ=1) |
-| Clean data (test acc) | 0.931 | 0.933 | 0.934 |
-| High LR (steps to converge) | 70 | 50 | **36** (ρ=0.5) |
+| 30% label noise (test acc) | 0.675 | 0.680 | **0.810** (ρ=1) |
+| 15% label noise (test acc) | 0.764 | 0.773 | **0.857** (ρ=1) |
+| Clean data (test acc) | 0.931 | 0.933 | 0.935 |
+| High LR (steps to converge) | 70 | 50 | **38** (ρ=0.5) |
 | Wall-clock (relative to Adam) | **1.00×** | 2.54× | 2.16× |
 | Optimizer state | **1.00×** | 1.5× | **1.00×** |
 
 Generalisation of the label-noise result was checked across 7 configurations varying depth,
 width, dimension, class count and noise level: **CASMO ρ=1 beats AdamW in 6/7**, with the
-margin widening as noise rises (+15.6 points at 50% label corruption). The single loss is a
+margin widening as noise rises (+16.4 points at 50% label corruption). The single loss is a
 configuration where both optimizers sit near chance, i.e. the model is under-fitting.
 
 ## [0.3.0] - 2025-01-09
