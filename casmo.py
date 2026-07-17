@@ -14,9 +14,12 @@ scales an AdamW update along two complementary axes:
 
   * trust   (absolute)  -- slows the whole tensor when its gradients are noise
                            dominated. This is what buys robustness to label noise.
-  * focus   (relative)  -- reweights coordinates toward the reliable directions
-                           without changing the overall pace. This preserves clean
-                           convergence speed and adds expressivity.
+  * focus   (relative)  -- shifts the update toward the coordinates whose signal
+                           fraction is above the tensor's average. It is capped at 1,
+                           so it only ever down-weights: reliable coordinates keep the
+                           full step rather than being boosted above it. That cap costs
+                           a little pace (mean(focus) <= 1) but was measured to be what
+                           keeps CASMO stable at aggressive learning rates.
 
 A single ``robustness`` dial in ``[0, 1]`` interpolates between "behave like AdamW"
 (``0``) and "maximally noise robust" (``1``). The default of ``0.5`` improves
@@ -42,6 +45,13 @@ _DEPRECATED_KWARGS = (
     "agar_clamp_factor",
     "total_steps",
 )
+
+
+def _to_float(value: Any) -> Optional[float]:
+    """Materialize a reported metric, which step() leaves on the device."""
+    if value is None:
+        return None
+    return value.item() if isinstance(value, torch.Tensor) else float(value)
 
 
 class CASMO(torch.optim.Optimizer):
@@ -195,7 +205,11 @@ class CASMO(torch.optim.Optimizer):
 
                 signal = m_hat * m_hat
                 total = signal + s_hat  # ~= E[g^2]
-                agar = signal / (total + eps)  # per-coord signal fraction
+                # No epsilon here: signal <= total by construction, so total == 0
+                # implies signal == 0 and the ratio is 0. Adding eps instead would
+                # make AGAR depend on the absolute gradient scale rather than on the
+                # signal-to-noise ratio it is defined as.
+                agar = signal / total.clamp_min(torch.finfo(total.dtype).tiny)
 
                 agar_mean = agar.mean()
                 trust = c_min + (1 - c_min) * agar_mean  # absolute pace (scalar)
@@ -207,19 +221,20 @@ class CASMO(torch.optim.Optimizer):
                     p.mul_(1 - lr * weight_decay)
                 p.addcdiv_(m_hat * confidence, denom, value=-lr)
 
-                n = agar.numel()
                 agar_contrib = agar.sum()
                 conf_contrib = confidence.sum()
                 agar_sum = agar_contrib if agar_sum is None else agar_sum + agar_contrib
                 conf_sum = conf_contrib if conf_sum is None else conf_sum + conf_contrib
-                count += n
+                count += agar.numel()
 
             gs = self._group_states.setdefault(
                 group_idx, {"current_agar": None, "current_confidence": None}
             )
             if count > 0:
-                gs["current_agar"] = (agar_sum / count).item()
-                gs["current_confidence"] = (conf_sum / count).item()
+                # Kept as device tensors. Calling .item() here would block on the
+                # accelerator every step; group_metrics() converts on demand instead.
+                gs["current_agar"] = agar_sum / count
+                gs["current_confidence"] = conf_sum / count
 
         return loss
 
@@ -228,9 +243,13 @@ class CASMO(torch.optim.Optimizer):
 
         Useful for logging the optimizer's live view of gradient signal quality.
         Values are ``None`` before the first :meth:`step`.
+
+        The values are computed on-device during :meth:`step` and converted here, so
+        reading them costs one host synchronization per call. Log them every N steps
+        rather than every step if you are throughput bound.
         """
         gs = self._group_states.get(group_idx, {})
         return {
-            "agar": gs.get("current_agar"),
-            "confidence": gs.get("current_confidence"),
+            "agar": _to_float(gs.get("current_agar")),
+            "confidence": _to_float(gs.get("current_confidence")),
         }

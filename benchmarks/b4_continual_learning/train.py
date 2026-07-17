@@ -146,10 +146,10 @@ def train_on_task(
                 progress_bar.set_postfix({"loss": f"{current_loss:.4f}"})
 
                 # Track AGAR/Confidence for CASMO (Plot 3)
-                if results_dict is not None and hasattr(optimizer, "_group_states"):
-                    group_state = optimizer._group_states.get(0, {})
-                    agar = group_state.get("current_agar")
-                    conf = group_state.get("current_confidence")
+                if results_dict is not None and hasattr(optimizer, "group_metrics"):
+                    metrics = optimizer.group_metrics(0)
+                    agar = metrics["agar"]
+                    conf = metrics["confidence"]
 
                     if agar is not None:
                         results_dict["agar_history"].append(agar)

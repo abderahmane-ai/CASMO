@@ -163,10 +163,10 @@ def train_task(model, optimizer, dataloader, task_name, epochs=2, track_stats=Fa
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             # Track CASMO internals
-            if track_stats and hasattr(optimizer, "_group_states"):
-                group_state = optimizer._group_states.get(0, {})
-                agar = group_state.get("current_agar")
-                conf = group_state.get("current_confidence")
+            if track_stats and hasattr(optimizer, "group_metrics"):
+                metrics = optimizer.group_metrics(0)
+                agar = metrics["agar"]
+                conf = metrics["confidence"]
                 if agar is not None:
                     stats["agar"].append(agar)
                     stats["confidence"].append(conf)

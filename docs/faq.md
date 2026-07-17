@@ -105,6 +105,27 @@ usually small next to forward/backward. Measure end-to-end before worrying about
 The check (`isnan().any()`) forces a host-device synchronization every step, for every
 parameter. v0.3 did this and paid for it. Set `nan_guard=True` if you want it.
 
+### Does logging `group_metrics()` cost anything?
+
+`step()` performs no host synchronization — the metrics are accumulated as device tensors
+and only converted to Python floats when you call `group_metrics()`. So each *call* costs
+one sync. Log every N steps rather than every step if you are throughput bound. (Moving
+this conversion out of `step()` measured 1.19× faster on a 40-layer model on MPS.)
+
+### Does it run on MPS (Apple Silicon) / CUDA?
+
+Yes, both — `casmo.py` contains no device-specific code, so it follows your parameters
+wherever they live. The test suite exercises whichever accelerator is present.
+
+### Is it optimized for many-layer models (multi-tensor / `foreach`)?
+
+Not yet. `step()` loops over parameters, so a model with very many small tensors pays one
+kernel launch per tensor. Measured on the hardware available during development, that
+overhead is small (`foreach` buys stock AdamW only 1.02× on CPU / 1.11× on MPS), and
+CASMO's ~1.9× gap over Adam is the per-coordinate gate itself rather than launch overhead.
+On CUDA the launch overhead is larger and a `foreach` port would likely help more, but that
+has not been measured, so it is not claimed. See `CLAUDE.md` → "Known headroom".
+
 ---
 
 ## Troubleshooting

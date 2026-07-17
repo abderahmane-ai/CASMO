@@ -37,7 +37,14 @@ Decompose gradient power into signal and noise, **per coordinate** $i$:
 - **Signal power**: $S_i = \hat{m}_i^2 \approx (\mathbb{E}[g_i])^2$
 - **Noise power**: $N_i = \hat{s}_i \approx \mathrm{Var}[g_i]$
 
-$$\mathrm{AGAR}_i = \frac{S_i}{S_i + N_i + \epsilon} \in [0, 1]$$
+$$\mathrm{AGAR}_i = \frac{S_i}{S_i + N_i} \in [0, 1]$$
+
+Note there is no $\epsilon$ in this denominator. Since $S_i \le S_i + N_i$ by construction, a
+zero denominator implies a zero numerator, so the ratio is simply clamped to 0 there. Adding
+an $\epsilon$ would make AGAR depend on the *absolute scale* of the gradient rather than on the
+ratio it is defined as: with $\epsilon = 10^{-8}$, a coordinate with a perfect signal-to-noise
+ratio of 100 reads $\mathrm{AGAR} \approx 0.99$ at gradient scale $1$ but $\approx 0.01$ at scale
+$10^{-5}$, purely because the gradient got small.
 
 | Value | Interpretation |
 |---|---|
@@ -95,7 +102,12 @@ With $\rho = 0$ and $r_{\text{floor}} = 1$, $C_i \equiv 1$ and the rule reduces 
 | 6 | $C_i = \text{trust}^{\rho}\cdot\text{focus}_i$ |
 | 7 | AdamW step scaled by $C_i$, denominator $\sqrt{S+N}$ |
 
-There is no calibration phase, no frozen threshold, no warm-up, and no host-device synchronization in the hot path.
+There is no calibration phase, no frozen threshold, and no warm-up.
+
+The step itself performs no host-device synchronization: the reported AGAR and confidence are
+accumulated as device tensors and only materialized when `group_metrics()` is called, so a run
+that logs them every 100 steps pays for 1 sync per 100 steps rather than 1 per step. (Removing
+an earlier per-step `.item()` from this path measured 1.19× faster on a 40-layer model on MPS.)
 
 ---
 

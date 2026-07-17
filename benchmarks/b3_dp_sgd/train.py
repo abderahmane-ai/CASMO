@@ -59,10 +59,10 @@ def get_agar_confidence(optimizer):
     if hasattr(optimizer, "original_optimizer"):
         optimizer = optimizer.original_optimizer
 
-    if not hasattr(optimizer, "_group_states"):
+    if not hasattr(optimizer, "group_metrics"):
         return None, None
-    group_state = optimizer._group_states.get(0, {})
-    return group_state.get("current_agar"), group_state.get("current_confidence")
+    metrics = optimizer.group_metrics(0)
+    return metrics["agar"], metrics["confidence"]
 
 
 # -----------------------------------------------------------------------------

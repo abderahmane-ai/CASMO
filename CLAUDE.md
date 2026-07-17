@@ -35,7 +35,7 @@ step in `.github/workflows/lint.yml`. Run black before pushing or CI goes red.
 m ← β₁m + (1-β₁)g                       # signal (first moment)
 s ← β₂s + (1-β₂)(g-m)²                   # noise (centered "belief" variance)
 sig = m̂², noise = ŝ, total = sig + noise
-agar_i  = sig_i / (total_i + eps)                        # signal fraction ∈ [0,1]
+agar_i  = sig_i / max(total_i, tiny)                     # signal fraction ∈ [0,1]
 trust   = c_min + (1-c_min)·mean(agar)                   # absolute pace  (scalar/tensor)
 focus_i = clip(agar_i / mean(agar), rel_floor, 1.0)      # relative focus (downweight-only)
 C_i     = trust**robustness · focus_i
@@ -52,13 +52,24 @@ Invariants that must not be broken:
    noise the baseline is itself noisy, so the optimizer concluded its noisy gradients were
    normal and suppressed nothing.
 3. **`focus` is capped at 1.0 — downweight only.** Allowing amplification (>1) measured
-   better on gradient noise but became unstable at high LR.
-4. **No host sync in the hot path.** No `.item()` per parameter, no `isnan().any()` by
-   default (that is `nan_guard`, opt-in), no numpy, no Python `deque`.
-5. **State stays standard.** Per-param state is `{step, m, s}`, so the parent
+   better on gradient noise but became unstable at high LR. Note this means
+   `mean(focus) <= 1`, so focus does cost a little pace — say that, don't claim it is
+   pace-neutral.
+4. **No host sync in the hot path.** No `.item()` anywhere in `step()` — the reported
+   metrics stay device tensors and `group_metrics()` materializes them on demand.
+   (Removing a per-step `.item()` measured **1.19× faster** on a 40-layer model on MPS.)
+   Also no `isnan().any()` by default (that is `nan_guard`, opt-in), no numpy, no `deque`.
+   There is a test that asserts `step()` leaves metrics as tensors — do not "simplify" it
+   back into a float.
+5. **No epsilon in the AGAR denominator.** `agar = sig / max(total, tiny)`. Since
+   `sig <= total`, a zero denominator implies a zero numerator, so no eps is needed. Adding
+   one makes AGAR depend on the *absolute gradient scale* instead of the ratio it is defined
+   as: with `+eps`, a fixed SNR of 100 reads 0.897 at gradient scale 1 but 0.470 at scale
+   1e-4. `test_agar_is_invariant_to_gradient_scale` guards this.
+6. **State stays standard.** Per-param state is `{step, m, s}`, so the parent
    `torch.optim.Optimizer` handles `state_dict`/`load_state_dict`. Do not add custom
    serialization — v0.3 did and it was a bug source.
-6. `robustness=0, rel_floor=1` must reduce **exactly** to AdamW.
+7. `robustness=0, rel_floor=1` must reduce **exactly** to AdamW.
 
 ## Validate before you claim
 
@@ -133,3 +144,26 @@ Lesson encoded here: when removing a concept, grep for it everywhere
   been re-run. They are historical; do not cite them as current results.
 - Removed kwargs stay accepted with a `DeprecationWarning` (see `_DEPRECATED_KWARGS`) so
   downstream code keeps running. Unknown kwargs raise `TypeError`.
+
+## Known headroom (measured, not yet taken)
+
+**`foreach` / multi-tensor.** `step()` loops per parameter, so a model with many small
+tensors pays a kernel launch per tensor. Measured headroom on the hardware available here
+(60x256 MLP): `torch.optim.AdamW(foreach=True)` beats `foreach=False` by only **1.02x on
+CPU / 1.11x on MPS**, and CASMO sits at ~2.2x AdamW either way — i.e. the cost is the
+per-coordinate gate, not the launches. On **CUDA** the launch overhead is known to be far
+more significant (it is why PyTorch defaults to foreach), so the win is likely larger
+there, but **it has not been measured on CUDA and must not be claimed until it is**.
+
+If you implement it: `torch._foreach_*` covers everything except the per-tensor mean, which
+`torch._foreach_norm(agar, 1)` gives (L1 == sum, since `agar >= 0`), divided by `numel`.
+Validate numerical equivalence against the current path before landing.
+
+**`capturable` / CUDA graphs.** `state["step"]` is a Python int, which blocks CUDA-graph
+capture. PyTorch gates the tensor-step variant behind an opt-in `capturable` flag precisely
+because a device-tensor step costs performance in the common case — follow that pattern if
+it is ever needed; do not make it unconditional.
+
+**MPS/CUDA**: `casmo.py` contains zero device-specific code and works on both as-is;
+`tests/test_device_and_groups.py` runs the suite on whatever accelerator is present. Keep it
+device-agnostic.

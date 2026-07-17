@@ -151,3 +151,79 @@ configured with ρ=0.5 accordingly.
 **Rule of thumb:** high ρ pays off when the model *would otherwise memorise noise*. It
 costs you when the model is still under-fitting — whether because the noise is isotropic,
 the step budget is short, or the learning rate is too low to converge.
+
+## 7. Post-review refinements
+
+An external review of the shipped v0.4 raised four points. Each was checked by measurement
+rather than accepted or dismissed on argument.
+
+### 7.1 Host synchronization in `step()` — valid, fixed
+
+`step()` called `.item()` on the accumulated metrics once per group per step, which blocks
+the host on the accelerator. `CASMO_THEORY.md` simultaneously claimed "no host-device
+synchronization in the hot path" — the same class of doc/code contradiction this redesign
+set out to remove from v0.3.
+
+Metrics are now accumulated as device tensors and materialized only in `group_metrics()`.
+Measured on a 40-layer 256-wide MLP on MPS:
+
+| | ms/step |
+|---|---|
+| with per-step `.item()` | 15.30 |
+| deferred (tensors) | **12.89** |
+
+**1.19× faster (15.7%)**, and the docs now match the code.
+
+### 7.2 Epsilon in the AGAR denominator — valid, fixed, but not results-changing
+
+`agar = signal / (total + eps)` makes AGAR depend on the *absolute gradient scale*, not the
+ratio it is defined as. Holding the true SNR fixed at 100 and varying only the scale:
+
+| gradient scale | AGAR with `+eps` | AGAR true |
+|---|---|---|
+| 1e0 | 0.9901 | 0.9901 |
+| 1e-3 | 0.9804 | 0.9901 |
+| 1e-4 | 0.4975 | 0.9901 |
+| 1e-5 | 0.0099 | 0.9901 |
+
+Now computed as `signal / max(total, tiny)`; since `signal <= total`, a zero denominator
+implies a zero numerator, so no epsilon is needed.
+
+**Honest scope of the fix.** In real training the coordinates that fall below eps are also
+genuinely noise-dominated, so the two effects coincide: on a long clean run the `+eps`
+reading was 0.0001 where the true value was 0.0003 — both round to "no signal". Re-running
+all five regimes with the fix produced **identical results within seed noise**. It is a
+correctness fix that makes the implementation match the documented mathematics (and would
+matter in pure bf16, where gradient² routinely sits under 1e-8); it is **not** a bug that
+was changing outcomes. `test_agar_is_invariant_to_gradient_scale` fails on the old formula
+(spread 0.427) and passes on the new one (spread 6e-8).
+
+### 7.3 `focus` is a dampener, not a reweighting — valid, documentation fixed
+
+The cap at 1.0 means `mean(focus) <= 1`, so focus does slow the overall pace slightly; the
+docstring claimed it reweighted "without changing the overall pace". The cap itself stays —
+§2 measured that allowing amplification destabilises at high LR — but the description now
+says what the code does.
+
+### 7.4 `foreach` / multi-tensor — valid direction, deliberately not taken yet
+
+Measured headroom on a 60×256 MLP, where kernel-launch overhead should dominate:
+
+| | CPU | MPS |
+|---|---|---|
+| AdamW `foreach=True` | 11.65 ms | 9.29 ms |
+| AdamW `foreach=False` | 11.84 ms | 10.35 ms |
+| **foreach speedup** | **1.02×** | **1.11×** |
+| CASMO vs AdamW(foreach) | 2.28× | 2.25× |
+
+So on available hardware foreach is worth 2–11%, and CASMO's ~2.2× gap is the per-coordinate
+gate itself, not launch overhead — foreach would recover roughly a tenth of it. On CUDA the
+overhead is known to be materially larger, so the win is plausibly bigger, **but there is no
+CUDA here to measure it**. Landing a substantial rewrite whose benefit cannot be verified
+would violate this project's own rule. Recorded as measured headroom in `CLAUDE.md`, to be
+implemented and validated when a CUDA device is available.
+
+### 7.5 MPS — already supported
+
+`casmo.py` contains no device-specific code. Verified training end-to-end on MPS;
+`tests/test_device_and_groups.py` now exercises whatever accelerator is present.
